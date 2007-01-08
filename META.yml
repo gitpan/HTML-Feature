@@ -1,17 +1,17 @@
 # http://module-build.sourceforge.net/META-spec.html
 #XXXXXXX This is a prototype!!!  It will change in the future!!! XXXXX#
 name:         HTML-Feature
-version:      v0.1.0
+version:      v0.1.1
 version_from: lib/HTML/Feature.pm
 installdirs:  site
 requires:
-    Data::Dumper:                  2.12108
     Encode:                        2.12
     Encode::Guess:                 2
     HTML::Entities:                1.35
     HTML::TokeParser:              2.37
     LWP::Simple:                   1.41
     Statistics::Lite:              2
+    version:                       0.68
 
 distribution_type: module
 generated_by: ExtUtils::MakeMaker version 6.30

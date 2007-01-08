@@ -3,7 +3,7 @@ package HTML::Feature;
 use strict;
 use warnings;
 use Carp;
-use version; our $VERSION = qv('0.01');
+use version; our $VERSION = qv('0.1.1');
 
 use base qw( Exporter );
 our @EXPORT = qw( extract );
@@ -14,14 +14,7 @@ use HTML::Entities;
 use Statistics::Lite qw(mean);
 use Encode;
 use Encode::Guess;
-use Data::Dumper;
-{
-    no warnings;
 
-    package Data::Dumper;
-    sub qquote { return shift; }
-}
-$Data::Dumper::Useperl = 1;
 
 sub new {
     my $class = shift;
