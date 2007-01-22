@@ -3,10 +3,7 @@ package HTML::Feature;
 use strict;
 use warnings;
 use Carp;
-use version; our $VERSION = qv('0.1.1');
-
-use base qw( Exporter );
-our @EXPORT = qw( extract );
+use version; our $VERSION = qv('0.2.0');
 
 use LWP::Simple;
 use HTML::TokeParser;
@@ -14,7 +11,6 @@ use HTML::Entities;
 use Statistics::Lite qw(mean);
 use Encode;
 use Encode::Guess;
-
 
 sub new {
     my $class = shift;
@@ -60,12 +56,17 @@ sub _initialize {
 
     # set defaule value
     $self->{tag_score} ||= {
-        a      => 0.90,
-        b      => 1.05,
-        strong => 1.05,
-        h1     => 1.2,
-        h2     => 1.1,
-        h3     => 1.05
+        a      => 0.85,
+        option => 0.5,
+        b      => 1.15,
+        strong => 1.15,
+        h1     => 2,
+        h2     => 1.8,
+        h3     => 1.5
+    };
+    $self->{string_score} ||= {
+        'copyright'           => 0.65,
+        'all rights reserved' => 0.65
     };
     $self->{ret_num} ||= 1;
     $self->{suspects_enc} ||= [ 'euc-jp', 'shiftjis', '7bit-jis', ];
@@ -79,21 +80,35 @@ sub _score {
       sort { $b->{score} <=> $a->{score} }
       map {
         my $block;
-        my $score = 1;
-        my $p     = HTML::TokeParser->new( \$_ );
-        my @tags  = keys( %{ $self->{tag_score} } );
+        my $score   = 1;
+        my $p       = HTML::TokeParser->new( \$_ );
+        my @tags    = keys( %{ $self->{tag_score} } );
+        my @strings = keys( %{ $self->{string_score} } );
         while ( my $token = $p->get_token ) {
             $block->{contents} .= $token->[1] if $token->[0] eq 'T';
             for my $tag (@tags) {
                 if ( $token->[0] eq 'S' && $token->[1] eq $tag ) {
-                    $score = $score * $self->{tag_score}->{$tag};
-                    $block->{contents} .= $p->get_text;
-                    $block->{match_tags}->{$tag}++;
+                    my $text = $p->get_text;
+                    if ( $text =~ m{.+} ) {
+                        $block->{contents} .= $text;
+                        $score = $score * $self->{tag_score}->{$tag};
+                        $block->{match_tags}->{$tag}++;
+                    }
                 }
             }
         }
         $block->{length} = bytes::length( $block->{contents} );
         $block->{score}  = $block->{length} * $score;
+        for my $string (@strings) {
+            my $quotemeta = quotemeta($string);
+            if ( defined( $block->{contents} ) ) {
+                while ( $block->{contents} =~ m{($quotemeta)}xmsig ) {
+                    $block->{score} =
+                      $block->{score} * $self->{string_score}->{$string};
+                    $block->{match_string}->{$string}++;
+                }
+            }
+        }
         $block;
       } @{ $self->{blocks} };
 
@@ -123,6 +138,7 @@ sub _split {
         }
     }
     my $average = sprintf( "%.0f", mean(@n) );
+    $average ||= 1;
 
     # set boundary and split contents
     my $boundary = "\n" x $average;
@@ -143,6 +159,12 @@ sub _tag_cleaning {
     $self->{html} =~ s{\r\n}{\n}xmg;
     $self->{html} =~ s{^\s*(.+)$}{$1}xmg;
     $self->{html} =~ s{^\t*(.+)$}{$1}xmg;
+
+    # LineFeed_counter
+    my $lf_cnt;
+    while ( $self->{html} =~ m{(\n)}xmgs ) {
+        $lf_cnt++;
+    }
 
     # parse and pickup tag (scored tag)
     my $p = HTML::TokeParser->new( \( $self->{html} ) );
@@ -169,7 +191,7 @@ sub _tag_cleaning {
             }
         }
         $html .= encode_entities( $p->get_text, "<>&" );
-        $html .= "\n" if $html !~ m{\n$};
+        $html .= "\n" unless $lf_cnt;
     }
     $html =~ s{\[IMG\]}{}xmsig;
     $self->{html} = $html;
@@ -177,11 +199,16 @@ sub _tag_cleaning {
 
 sub _guess_enc {
     my $self = shift;
+
     my $html = $self->{html};
+
+    $Encode::Guess::NoUTFAutoGuess = 1;
+
     my $guess =
       Encode::Guess::guess_encoding( $html, @{ $self->{suspects_enc} } );
     unless ( ref $guess ) {
-        $html = decode( "utf-8", $html );
+        warn "no match UNICODE";
+        $html = "";
     }
     else {
         eval { $html = $guess->decode($html); };
@@ -237,7 +264,7 @@ HTML::Feature - an extractor of feature sentence from HTML
     }
 
     # print more details
-    prin Dumper($data);
+    print Dumper($data);
 
 
 =head1 DESCRIPTION
@@ -272,19 +299,22 @@ return feature blocks with TITLE and DESCRIPTION.
 
     # it is possible to transfer default value to the constructor
     my $f = HTML::Feature->new(
-        # set the factor every of tag 
-        tag_score => {
-            a => 0.90,
-            b => 1.05,
-            strong => 1.05,
-            h1 => 1.2,
-            h2 => 1.1,
-            h3 => 1.05
-        },
-        # set return number
-        ret_num => 3,
-        # set Corresponding character code
-        suspects_enc => ['euc-jp', 'shiftjis', '7bit-jis']
+        # set defaule value
+        $self->{tag_score} ||= {
+            a      => 0.85,
+            option => 0.5,
+            b      => 1.15,
+            strong => 1.15,
+            h1     => 2,
+            h2     => 1.8,
+            h3     => 1.5
+        };
+        $self->{string_score} ||= {
+            'copyright'     => 0.65,
+            'all rights reserved' => 0.65
+        };
+        $self->{ret_num} ||= 1;
+        $self->{suspects_enc} ||= [ 'euc-jp', 'shiftjis', '7bit-jis', ];
     );
 
 
