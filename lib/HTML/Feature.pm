@@ -2,15 +2,13 @@ package HTML::Feature;
 
 use strict;
 use warnings;
-use Carp;
-use version; our $VERSION = qv('0.2.0');
-
 use LWP::Simple;
-use HTML::TokeParser;
-use HTML::Entities;
-use Statistics::Lite qw(mean);
 use Encode;
-use Encode::Guess;
+use Encode::Detect;
+use HTML::TreeBuilder;
+use Statistics::Lite qw(statshash);
+
+our $VERSION = '1.0.1';
 
 sub new {
     my $class = shift;
@@ -35,15 +33,10 @@ sub extract {
 
     # catch url or string
     $self->{html} = defined $arg{string} ? $arg{string} : get( $arg{url} );
-
-    # guess encodings
-    $self->_guess_enc();
+    $self->{html} = decode( "Detect", $self->{html} );
 
     # tag cleaning
     $self->_tag_cleaning();
-
-    # split data
-    $self->_split();
 
     # score
     $self->_score();
@@ -55,94 +48,114 @@ sub _initialize {
     my $self = shift;
 
     # set defaule value
-    $self->{tag_score} ||= {
-        a      => 0.85,
-        option => 0.5,
-        b      => 1.15,
-        strong => 1.15,
-        h1     => 2,
-        h2     => 1.8,
-        h3     => 1.5
-    };
-    $self->{string_score} ||= {
-        'copyright'           => 0.65,
-        'all rights reserved' => 0.65
-    };
-    $self->{ret_num} ||= 1;
-    $self->{suspects_enc} ||= [ 'euc-jp', 'shiftjis', '7bit-jis', ];
+    $self->{ret_num}   ||= 1;
+    $self->{enc_type}  ||= '';
+    $self->{max_bytes} ||= '';
+    $self->{min_bytes} ||= '';
 }
 
 sub _score {
     my $self = shift;
 
-    # score calculation every tag blocks
-    my @scored =
-      sort { $b->{score} <=> $a->{score} }
-      map {
-        my $block;
-        my $score   = 1;
-        my $p       = HTML::TokeParser->new( \$_ );
-        my @tags    = keys( %{ $self->{tag_score} } );
-        my @strings = keys( %{ $self->{string_score} } );
-        while ( my $token = $p->get_token ) {
-            $block->{contents} .= $token->[1] if $token->[0] eq 'T';
-            for my $tag (@tags) {
-                if ( $token->[0] eq 'S' && $token->[1] eq $tag ) {
-                    my $text = $p->get_text;
-                    if ( $text =~ m{.+} ) {
-                        $block->{contents} .= $text;
-                        $score = $score * $self->{tag_score}->{$tag};
-                        $block->{match_tags}->{$tag}++;
-                    }
-                }
-            }
-        }
-        $block->{length} = bytes::length( $block->{contents} );
-        $block->{score}  = $block->{length} * $score;
-        for my $string (@strings) {
-            my $quotemeta = quotemeta($string);
-            if ( defined( $block->{contents} ) ) {
-                while ( $block->{contents} =~ m{($quotemeta)}xmsig ) {
-                    $block->{score} =
-                      $block->{score} * $self->{string_score}->{$string};
-                    $block->{match_string}->{$string}++;
-                }
-            }
-        }
-        $block;
-      } @{ $self->{blocks} };
+    my $root = HTML::TreeBuilder->new;
+    $root->parse( $self->{html} );
 
-    # set return data
-    $self->{ret} = {
-        'title'       => $self->{title},
-        'description' => $self->{description},
-        'block'       => [ @scored[ 0 .. ( $self->{ret_num} - 1 ) ] ]
-    };
+    my $data;
 
-}
-
-sub _split {
-    my $self = shift;
-
-    # calculate the average number of an empty line
-    my $count = 0;
-    my @n;
-    return unless $self->{html};
-    for ( split( /\n/, $self->{html} ) ) {
-        if ( $_ =~ /./ ) {
-            if ( $count > 0 ) { push( @n, $count ); }
-            $count = 0;
-        }
-        else {
-            $count++;
-        }
+    if ( my $title = $root->find("title") ) {
+        $self->{ret}->{title} =
+          $self->{enc_type}
+          ? encode( $self->{enc_type}, $title->as_text )
+          : $title->as_text;
     }
-    my $average = sprintf( "%.0f", mean(@n) );
-    $average ||= 1;
 
-    # set boundary and split contents
-    my $boundary = "\n" x $average;
-    $self->{blocks} = [ split( /$boundary/, $self->{html} ) ];
+    if ( my $desc = $root->look_down( _tag => 'meta', name => 'description' ) )
+    {
+        my $string = $desc->attr('content');
+        $string =~ s{<br>}{}xms;
+        $self->{ret}->{description} =
+          $self->{enc_type} ? encode( $self->{enc_type}, $string ) : $string;
+    }
+
+    my $i = 0;
+    my @ratio;
+    my @depth;
+    my @order;
+    for my $node ( $root->look_down( "_tag", qr/body|td|div/i ) ) {
+
+        my @address     = split( /\./, $node->address() );
+        my $text_length = bytes::length( $node->as_text );
+        my $html_length = bytes::length( $node->as_HTML );
+        my $text_ration = $text_length / $html_length;
+
+        next
+          if ( $self->{max_bytes} =~ /^[\d]+$/
+            && $text_length > $self->{max_bytes} );
+        next
+          if ( $self->{min_bytes} =~ /^[\d]+$/
+            && $text_length < $self->{min_bytes} );
+
+        my $a_count       = 0;
+        my $a_length      = 0;
+        my $option_count  = 0;
+        my $option_length = 0;
+
+        my %node_hash;
+        $self->_walk_tree( $node, \%node_hash );
+
+        $node_hash{a_length}      ||= 0;
+        $node_hash{option_length} ||= 0;
+        $node_hash{text}          ||= '';
+
+        next if $node_hash{text} !~ /[^ ]+/;
+
+        $data->[$i]->{text}        = $node_hash{text};
+        $data->[$i]->{text_length} = $text_length;
+
+        push( @ratio,
+            ( $text_length - $node_hash{a_length} - $node_hash{option_length} )
+              * $text_ration );
+        push( @depth, $#address + 1 );
+
+        $i++;
+    }
+
+    for ( 0 .. $i ) {
+        push( @order, log( $i - $_ + 1 ) );
+    }
+
+    my %ratio = statshash @ratio;
+    my %depth = statshash @depth;
+    my %order = statshash @order;
+
+    no warnings;
+
+    my @sorted =
+      sort { $data->[$b]->{score} <=> $data->[$a]->{score} }
+      map {
+        my $ratio_std = ( $ratio[$_] - $ratio{mean} ) / ( $ratio{stddev} );
+        my $depth_std = ( $depth[$_] - $depth{mean} ) / ( $depth{stddev} );
+        my $order_std = ( $order[$_] - $order{mean} ) / ( $order{stddev} );
+        $data->[$_]->{score}     = $ratio_std + $depth_std + $order_std;
+        $data->[$_]->{ratio_std} = $ratio_std;
+        $data->[$_]->{depth_std} = $depth_std;
+        $data->[$_]->{order_std} = $order_std;
+        $_;
+      } ( 0 .. $i );
+
+    $i = 0;
+    for (@sorted) {
+        $self->{ret}->{block}->[$i]->{contents} =
+          $self->{enc_type}
+          ? encode( $self->{enc_type}, $data->[$_]->{text} )
+          : $data->[$_]->{text};
+        $self->{ret}->{block}->[$i]->{score} =
+          $self->{enc_type}
+          ? encode( $self->{enc_type}, $data->[$_]->{score} )
+          : $data->[$_]->{score};
+        $i++;
+        last if $i == $self->{ret_num};
+    }
 }
 
 sub _tag_cleaning {
@@ -159,61 +172,30 @@ sub _tag_cleaning {
     $self->{html} =~ s{\r\n}{\n}xmg;
     $self->{html} =~ s{^\s*(.+)$}{$1}xmg;
     $self->{html} =~ s{^\t*(.+)$}{$1}xmg;
-
-    # LineFeed_counter
-    my $lf_cnt;
-    while ( $self->{html} =~ m{(\n)}xmgs ) {
-        $lf_cnt++;
-    }
-
-    # parse and pickup tag (scored tag)
-    my $p = HTML::TokeParser->new( \( $self->{html} ) );
-    my $html;
-    my @tags = keys( %{ $self->{tag_score} } );
-    while ( my $token = $p->get_token ) {
-        if ( $token->[0] eq 'S' && $token->[1] eq "title" ) {
-            $self->{title} = $p->get_trimmed_text;
-        }
-        if ( $token->[0] eq 'S' && $token->[1] eq "meta" ) {
-            if ( defined( $token->[2]->{name} ) ) {
-                if ( $token->[2]->{name} eq 'description' ) {
-                    $self->{description} = $token->[2]->{content};
-                }
-            }
-        }
-        for (@tags) {
-            if ( $token->[0] eq 'S' && $token->[1] eq $_ ) {
-                $html .= $token->[4];
-                $html .= encode_entities( $p->get_trimmed_text, "<>&" );
-            }
-            if ( $token->[0] eq 'E' && $token->[1] eq $_ ) {
-                $html .= $token->[2];
-            }
-        }
-        $html .= encode_entities( $p->get_text, "<>&" );
-        $html .= "\n" unless $lf_cnt;
-    }
-    $html =~ s{\[IMG\]}{}xmsig;
-    $self->{html} = $html;
 }
 
-sub _guess_enc {
-    my $self = shift;
+sub _walk_tree {
+    my $self          = shift;
+    my $node          = shift;
+    my $node_hash_ref = shift;
 
-    my $html = $self->{html};
+    if ( ref $node ) {
+        if ( $node->tag =~ /p|br|hr|tr|ul|li|ol|dl|dd/ ) {
 
-    $Encode::Guess::NoUTFAutoGuess = 1;
-
-    my $guess =
-      Encode::Guess::guess_encoding( $html, @{ $self->{suspects_enc} } );
-    unless ( ref $guess ) {
-        warn "no match UNICODE";
-        $html = "";
+            # print "\n";
+            $node_hash_ref->{text} .= "\n";
+        }
+        if ( $node->tag eq 'a' ) {
+            $node_hash_ref->{a_length} += bytes::length( $node->as_text );
+        }
+        if ( $node->tag eq 'option' ) {
+            $node_hash_ref->{option_length} += bytes::length( $node->as_text );
+        }
+        $self->_walk_tree( $_, $node_hash_ref ) for $node->content_list();
     }
     else {
-        eval { $html = $guess->decode($html); };
+        $node_hash_ref->{text} .= $node . " ";
     }
-    $self->{html} = $html;
 }
 
 1;
@@ -228,60 +210,30 @@ HTML::Feature - an extractor of feature sentence from HTML
 
     use strict;
     use HTML::Feature;
-    use Data::Dumper;
-    use Encode;
-    binmode STDOUT, ':encoding(utf-8)';
 
-    my $f = HTML::Feature->new;
+    my $f = HTML::Feature->new(
+	enc_type => 'utf-8',
+	ret_num => 10,
+	max_bytes => 5000,
+	min_bytes => 1
+    );
     my $data = $f->extract( url => 'http://www.perl.com' );
 
     # print result data
 
-    my $boundary = "-" x 40;
-
-    print "\n";
-    print $boundary, "\n";
-    print "* TITLE:\n";
-    print $boundary, "\n";
     print $data->{title}, "\n";
-
-    print "\n";
-    print $boundary, "\n";
-    print "* DESCRIPTION:\n";
-    print $boundary, "\n";
     print $data->{description}, "\n";
 
-    my $i = 0;
     for(@{$data->{block}}){
-        $i++;
-        print "\n";
-        print $boundary, "\n";
-        print "* CONTENTS-$i:\n";
-        print $boundary, "\n";
+        print $_->{score}, "\n";
         print $_->{contents}, "\n";
-        print $boundary, "\n";
-        print "SCORE:",$_->{score},"\n";
     }
-
-    # print more details
-    print Dumper($data);
 
 
 =head1 DESCRIPTION
 
-This module extracts some feature sentence from HTML.
-
-First, HTML document is divided into plural blocks by a certain boundary line. 
-
-And each blocking is evaluated individually. 
-
-Evaluation of each block is decided by document size (the number of bytes) and a coefficient of a tag.
-
-Being optional, arbitrary value can set a coefficient of a tag.
-
-By the way, this module is not designed to extract a feature sentence from a page such as a list of links(for example, top pages of portal site).  
-
-It may extract well a feature sentence from a page with quantity of some document, (for example, news peg or blog) .
+This module extracts some feature blocks from an HTML document. I do not adopt general technique such as "morphological analysis" in this module. 
+By simpler statistics processing, this module will extract a feature blocks. So, it may be able to apply it in a language of any country easily.
 
 =head1 METHODS
 
@@ -293,34 +245,30 @@ a object is made by using the options.
 
 =item extract(url => $url | string => $string)
 
-return feature blocks with TITLE and DESCRIPTION.
+return feature blocks (references) with TITLE and DESCRIPTION.
 
 =head1 OPTIONS
 
-    # it is possible to transfer default value to the constructor
+    # it is possible to set value to the constructor
     my $f = HTML::Feature->new(
-        # set defaule value
-        $self->{tag_score} ||= {
-            a      => 0.85,
-            option => 0.5,
-            b      => 1.15,
-            strong => 1.15,
-            h1     => 2,
-            h2     => 1.8,
-            h3     => 1.5
-        };
-        $self->{string_score} ||= {
-            'copyright'     => 0.65,
-            'all rights reserved' => 0.65
-        };
-        $self->{ret_num} ||= 1;
-        $self->{suspects_enc} ||= [ 'euc-jp', 'shiftjis', '7bit-jis', ];
-    );
+        
+	$self->{ret_num} = 1; 
+	# number of return blocks (default is '1').
+        
+	$self->{max_bytes} = '5000'; 
+	# The upper limit number of bytes of a node to analyze (default is '').
+        
+	$self->{min_bytes} = '10'; 
+	# The bottom limit number (default is '').
+        
+	$self->{enc_type} = 'euc-jp'; 
+	# An arbitrary character code, If there is not appointment in particular, I become the character code which an UTF-8 flag is with (default is '').
+   );
 
 
 =head1 SEE ALSO
 
-L<HTML::TokeParser>,L<HTML::Entites>,L<Encode::Guess>
+L<HTML::TreeBuilder>,L<Statistics::Lite>,L<Encode::Detect>
 
 
 =head1 AUTHOR

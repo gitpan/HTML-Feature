@@ -1,5 +1,5 @@
-HTML-Feature version 0.01
-=========================
+HTML-Feature version 1.0.1
+==========================
 
 This module extracts some feature sentence from HTML.
 
@@ -18,12 +18,10 @@ DEPENDENCIES
 This module requires these other modules and libraries:
 
     LWP::Simple
-    HTML::TokeParser
-    HTML::Entities
-    Statistics::Lite
     Encode
-    Encode::Guess
-    Data::Dumper
+    Encode::Detect
+    HTML::TreeBuilder
+    Statistics::Lite
 
 COPYRIGHT AND LICENCE
 
