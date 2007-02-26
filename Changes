@@ -14,3 +14,6 @@ Revision history for Perl extension HTML::Feature.
 
 1.0.1  2007.02.23
     - I largely changed analysis specifications of the script inside
+
+1.0.2  2007.02.26
+    - rewrite 'META.xml' and 'Makefile.PL'

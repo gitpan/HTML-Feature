@@ -8,7 +8,7 @@ use Encode::Detect;
 use HTML::TreeBuilder;
 use Statistics::Lite qw(statshash);
 
-our $VERSION = '1.0.1';
+our $VERSION = '1.0.2';
 
 sub new {
     my $class = shift;
