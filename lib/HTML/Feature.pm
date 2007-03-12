@@ -4,11 +4,11 @@ use strict;
 use warnings;
 use LWP::Simple;
 use Encode;
-use Encode::Detect;
+use Encode::Guess;
 use HTML::TreeBuilder;
 use Statistics::Lite qw(statshash);
 
-our $VERSION = '1.0.2';
+our $VERSION = '1.0.3';
 
 sub new {
     my $class = shift;
@@ -33,7 +33,7 @@ sub extract {
 
     # catch url or string
     $self->{html} = defined $arg{string} ? $arg{string} : get( $arg{url} );
-    $self->{html} = decode( "Detect", $self->{html} );
+    $self->_guess_enc();
 
     # tag cleaning
     $self->_tag_cleaning();
@@ -198,6 +198,21 @@ sub _walk_tree {
     }
 }
 
+sub _guess_enc {
+    my $self = shift;
+    my $html = $self->{html};
+    my $guess =
+      Encode::Guess::guess_encoding( $html,
+        ( 'euc-jp', 'shiftjis', '7bit-jis', 'utf-8' ) );
+    unless ( ref $guess ) {
+        $html = decode( "utf-8", $html );
+    }
+    else {
+        eval { $html = $guess->decode($html); };
+    }
+    $self->{html} = $html;
+}
+
 1;
 
 __END__
@@ -268,7 +283,7 @@ return feature blocks (references) with TITLE and DESCRIPTION.
 
 =head1 SEE ALSO
 
-L<HTML::TreeBuilder>,L<Statistics::Lite>,L<Encode::Detect>
+L<HTML::TreeBuilder>,L<Statistics::Lite>,L<Encode::Guess>
 
 
 =head1 AUTHOR

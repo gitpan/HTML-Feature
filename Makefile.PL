@@ -5,7 +5,7 @@ WriteMakefile(
     PREREQ_PM    => {
         LWP::Simple       => 1.41,
         Encode            => 2.12,
-        Encode::Detect    => 1.00,
+        Encode::Guess     => 2.00,
         HTML::TreeBuilder => 3.23,
         Statistics::Lite  => 2.0 ,
     },
