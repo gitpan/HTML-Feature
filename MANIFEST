@@ -2,6 +2,6 @@ Changes
 lib/HTML/Feature.pm
 Makefile.PL
 MANIFEST
+META.yml			Module meta-data (added by MakeMaker)
 README
 t/HTML-Feature.t
-META.yml                                 Module meta-data (added by MakeMaker)

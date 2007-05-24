@@ -8,7 +8,7 @@ use Encode::Guess;
 use HTML::TreeBuilder;
 use Statistics::Lite qw(statshash);
 
-our $VERSION = '1.0.3';
+our $VERSION = '1.0.4';
 
 sub new {
     my $class = shift;
@@ -52,6 +52,8 @@ sub _initialize {
     $self->{enc_type}  ||= '';
     $self->{max_bytes} ||= '';
     $self->{min_bytes} ||= '';
+    $self->{look_fine} ||= '';
+    $self->{debug}     ||= '';
 }
 
 sub _score {
@@ -81,12 +83,12 @@ sub _score {
     my @ratio;
     my @depth;
     my @order;
-    for my $node ( $root->look_down( "_tag", qr/body|td|div/i ) ) {
+    for my $node ( $root->look_down( "_tag", qr/body|center|td|div/i ) ) {
 
-        my @address     = split( /\./, $node->address() );
-        my $text_length = bytes::length( $node->as_text );
         my $html_length = bytes::length( $node->as_HTML );
-        my $text_ration = $text_length / $html_length;
+        my $text        = $node->as_text;
+        my $text_length = bytes::length($text);
+        my $text_ration = $text_length / ( $html_length + 0.001 );
 
         next
           if ( $self->{max_bytes} =~ /^[\d]+$/
@@ -99,23 +101,22 @@ sub _score {
         my $a_length      = 0;
         my $option_count  = 0;
         my $option_length = 0;
-
         my %node_hash;
-        $self->_walk_tree( $node, \%node_hash );
+
+        $self->_walk_tree( $node, \%node_hash ) if $self->{look_fine};
 
         $node_hash{a_length}      ||= 0;
         $node_hash{option_length} ||= 0;
-        $node_hash{text}          ||= '';
+        $node_hash{text}          ||= $text;
 
         next if $node_hash{text} !~ /[^ ]+/;
 
-        $data->[$i]->{text}        = $node_hash{text};
-        $data->[$i]->{text_length} = $text_length;
+        $data->[$i]->{contents} = $node_hash{text};
 
         push( @ratio,
             ( $text_length - $node_hash{a_length} - $node_hash{option_length} )
               * $text_ration );
-        push( @depth, $#address + 1 );
+        push( @depth, $node->depth() );
 
         $i++;
     }
@@ -133,26 +134,44 @@ sub _score {
     my @sorted =
       sort { $data->[$b]->{score} <=> $data->[$a]->{score} }
       map {
-        my $ratio_std = ( $ratio[$_] - $ratio{mean} ) / ( $ratio{stddev} );
-        my $depth_std = ( $depth[$_] - $depth{mean} ) / ( $depth{stddev} );
-        my $order_std = ( $order[$_] - $order{mean} ) / ( $order{stddev} );
-        $data->[$_]->{score}     = $ratio_std + $depth_std + $order_std;
-        $data->[$_]->{ratio_std} = $ratio_std;
-        $data->[$_]->{depth_std} = $depth_std;
-        $data->[$_]->{order_std} = $order_std;
+
+        my $ratio_std =
+          ( $ratio[$_] - $ratio{mean} ) / ( $ratio{stddev} + 0.001 );
+        my $depth_std =
+          ( $depth[$_] - $depth{mean} ) / ( $depth{stddev} + 0.001 );
+        my $order_std =
+          ( $order[$_] - $order{mean} ) / ( $order{stddev} + 0.001 );
+
+        $data->[$_]->{score} = $ratio_std + $depth_std + $order_std;
+
+        if ( $self->{debug} ) {
+            $data->[$_]->{ratio_std} = $ratio_std;
+            $data->[$_]->{depth_std} = $depth_std;
+            $data->[$_]->{order_std} = $order_std;
+        }
+
         $_;
       } ( 0 .. $i );
 
     $i = 0;
     for (@sorted) {
-        $self->{ret}->{block}->[$i]->{contents} =
-          $self->{enc_type}
-          ? encode( $self->{enc_type}, $data->[$_]->{text} )
-          : $data->[$_]->{text};
-        $self->{ret}->{block}->[$i]->{score} =
-          $self->{enc_type}
-          ? encode( $self->{enc_type}, $data->[$_]->{score} )
-          : $data->[$_]->{score};
+        if ( $self->{enc_type} ) {
+            $data->[$_]->{contents} =
+              encode( $self->{enc_type}, $data->[$_]->{contents} );
+            $data->[$_]->{score} =
+              encode( $self->{enc_type}, $data->[$_]->{score} );
+            if ( $self->{debug} ) {
+                $data->[$_]->{ratio_std} =
+                  encode( $self->{enc_type}, $data->[$_]->{ratio_std} );
+                $data->[$_]->{depth_std} =
+                  encode( $self->{enc_type}, $data->[$_]->{depth_std} );
+                $data->[$_]->{order_std} =
+                  encode( $self->{enc_type}, $data->[$_]->{order_std} );
+            }
+        }
+
+        $self->{ret}->{block}->[$i] = $data->[$_];
+
         $i++;
         last if $i == $self->{ret_num};
     }
@@ -164,14 +183,20 @@ sub _tag_cleaning {
     return unless $self->{html};
 
     # preprocessing
-    $self->{html} =~ s{<script.*?</script>}{}xmsig;
-    $self->{html} =~ s{<style.*?</style>}{}xmsig;
     $self->{html} =~ s{<!-.*?->}{}xmsg;
-    $self->{html} =~ s{&nbsp;}{ }xmsg;
+    $self->{html} =~ s{&nbsp;}{ }xmg;
     $self->{html} =~ s{&quot;}{\'}xmg;
     $self->{html} =~ s{\r\n}{\n}xmg;
     $self->{html} =~ s{^\s*(.+)$}{$1}xmg;
     $self->{html} =~ s{^\t*(.+)$}{$1}xmg;
+
+    # control code ( 0x00 - 0x1F, and 0x7F on ascii)
+    for ( 0 .. 31 ) {
+        my $control_code = '\x' . sprintf( "%x", $_ );
+        $self->{html} =~ s{$control_code}{}xmg;
+    }
+    $self->{html} =~ s{\x7f}{}xmg;
+
 }
 
 sub _walk_tree {
@@ -201,11 +226,12 @@ sub _walk_tree {
 sub _guess_enc {
     my $self = shift;
     my $html = $self->{html};
+    $Encode::Guess::NoUTFAutoGuess = 1;
     my $guess =
       Encode::Guess::guess_encoding( $html,
-        ( 'euc-jp', 'shiftjis', '7bit-jis', 'utf-8' ) );
+        ( 'shiftjis', 'euc-jp', '7bit-jis', 'utf8' ) );
     unless ( ref $guess ) {
-        $html = decode( "utf-8", $html );
+        $html = decode( "utf8", $html );
     }
     else {
         eval { $html = $guess->decode($html); };
@@ -227,10 +253,7 @@ HTML::Feature - an extractor of feature sentence from HTML
     use HTML::Feature;
 
     my $f = HTML::Feature->new(
-	enc_type => 'utf-8',
-	ret_num => 10,
-	max_bytes => 5000,
-	min_bytes => 1
+	    ret_num => 10 # default is '1'
     );
     my $data = $f->extract( url => 'http://www.perl.com' );
 
@@ -278,6 +301,9 @@ return feature blocks (references) with TITLE and DESCRIPTION.
         
 	$self->{enc_type} = 'euc-jp'; 
 	# An arbitrary character code, If there is not appointment in particular, I become the character code which an UTF-8 flag is with (default is '').
+	
+    $self->{look_fine} = '1'; 
+	# return data as "look fine" (default is ''). 
    );
 
 
