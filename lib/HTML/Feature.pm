@@ -8,7 +8,7 @@ use Encode::Guess;
 use HTML::TreeBuilder;
 use Statistics::Lite qw(statshash);
 
-our $VERSION = '1.0.4';
+our $VERSION = '1.0.5';
 
 sub new {
     my $class = shift;
@@ -128,6 +128,9 @@ sub _score {
     my %ratio = statshash @ratio;
     my %depth = statshash @depth;
     my %order = statshash @order;
+
+    # avoid memory leak
+    $root->delete();
 
     no warnings;
 
@@ -252,9 +255,7 @@ HTML::Feature - an extractor of feature sentence from HTML
     use strict;
     use HTML::Feature;
 
-    my $f = HTML::Feature->new(
-	    ret_num => 10 # default is '1'
-    );
+    my $f = HTML::Feature->new(ret_num => 10);
     my $data = $f->extract( url => 'http://www.perl.com' );
 
     # print result data
@@ -289,20 +290,15 @@ return feature blocks (references) with TITLE and DESCRIPTION.
 
     # it is possible to set value to the constructor
     my $f = HTML::Feature->new(
-        
-	$self->{ret_num} = 1; 
+	ret_num => 1, 
 	# number of return blocks (default is '1').
-        
-	$self->{max_bytes} = '5000'; 
+	max_bytes => 5000,
 	# The upper limit number of bytes of a node to analyze (default is '').
-        
-	$self->{min_bytes} = '10'; 
+	min_bytes => 10, 
 	# The bottom limit number (default is '').
-        
-	$self->{enc_type} = 'euc-jp'; 
+	enc_type => 'euc-jp', 
 	# An arbitrary character code, If there is not appointment in particular, I become the character code which an UTF-8 flag is with (default is '').
-	
-    $self->{look_fine} = '1'; 
+	look_fine => 1; 
 	# return data as "look fine" (default is ''). 
    );
 

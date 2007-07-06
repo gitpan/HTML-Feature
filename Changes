@@ -19,5 +19,9 @@ Revision history for Perl extension HTML::Feature.
 1.0.3  2007.03.12
     - change the encode module from "Encode::Detect" to "Encode::Guess"
 
-1.0.3  2007.05.24
+1.0.4  2007.05.24
     - add some functions and bug fix
+
+1.0.5  2007.07.06
+    - bug fix ( memory leak )
+
