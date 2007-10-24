@@ -1,22 +1,26 @@
-use ExtUtils::MakeMaker;
-WriteMakefile(
-    NAME         => 'HTML::Feature',
-    VERSION_FROM => 'lib/HTML/Feature.pm',    # finds $VERSION
-    PREREQ_PM    => {
-        LWP::Simple       => 1.41,
-        Encode            => 2.12,
-        Encode::Guess     => 2.00,
-        HTML::TreeBuilder => 3.23,
-        Statistics::Lite  => 2.0 ,
-    },
-    (
-        $] >= 5.005
-        ?    ## Add these new keywords supported since 5.005
-          (
-            ABSTRACT_FROM =>
-              'lib/HTML/Feature.pm',    # retrieve abstract from module
-            AUTHOR => 'Takeshi Miki <miki@cpan.org>'
-          )
-        : ()
-    ),
-);
+use strict;
+use inc::Module::Install;
+
+name 'HTML-Feature';
+all_from 'lib/HTML/Feature.pm';
+
+requires 'Carp';
+requires 'LWP::UserAgent';
+requires 'HTTP::Response::Encoding';
+requires 'Encode::Guess';
+requires 'UNIVERSAL::require';
+requires 'List::Util';
+requires 'Scalar::Util';
+requires 'HTML::TreeBuilder';
+requires 'Class::Accessor::Fast';
+requires 'HTML::TreeBuilder';
+requires 'Statistics::Lite';
+
+build_requires 'Test::More';
+build_requires 'Path::Class';
+build_requires 'FindBin';
+
+tests 't/*.t t/*/*.t'; 
+
+auto_install;
+WriteAll;

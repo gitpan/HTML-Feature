@@ -1,7 +1,31 @@
 Changes
+inc/Module/AutoInstall.pm
+inc/Module/Install.pm
+inc/Module/Install/AutoInstall.pm
+inc/Module/Install/Base.pm
+inc/Module/Install/Can.pm
+inc/Module/Install/Fetch.pm
+inc/Module/Install/Include.pm
+inc/Module/Install/Makefile.pm
+inc/Module/Install/Metadata.pm
+inc/Module/Install/Win32.pm
+inc/Module/Install/WriteAll.pm
 lib/HTML/Feature.pm
+lib/HTML/Feature/Engine.pm
+lib/HTML/Feature/Engine/TagStructure.pm
 Makefile.PL
-MANIFEST
-META.yml			Module meta-data (added by MakeMaker)
+MANIFEST			This list of files
+META.yml
 README
-t/HTML-Feature.t
+t/01_load.t
+t/02_method.t
+t/03_run/data/euc-jp.html
+t/03_run/data/sjis.html
+t/03_run/data/test.html
+t/03_run/data/utf8.html
+t/03_run/http.t
+t/03_run/oo.t
+t/03_run/simple.t
+t/99_kwalitee.t
+t/99_pod-coverage.t
+t/99_pod.t

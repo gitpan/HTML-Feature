@@ -1,14 +1,17 @@
 package HTML::Feature;
-
 use strict;
 use warnings;
-use LWP::Simple;
-use Encode;
+use vars qw($VERSION $UserAgent $engine @EXPORT_OK);
+use Exporter qw(import);
+use Carp;
+use HTTP::Response::Encoding;
 use Encode::Guess;
-use HTML::TreeBuilder;
-use Statistics::Lite qw(statshash);
+use List::Util qw(first);
+use Scalar::Util qw(blessed);
+use UNIVERSAL::require;
 
-our $VERSION = '1.0.5';
+$VERSION = '2.0.1';
+@EXPORT_OK = qw(feature);
 
 sub new {
     my $class = shift;
@@ -16,230 +19,151 @@ sub new {
     $class = ref $class || $class;
     my $self = bless \%arg, $class;
 
-    # initialize
-    $self->_initialize();
+    $self->{enc_type} ||= 'utf8';
 
     return $self;
 }
 
-sub extract {
-    my $self = shift;
-    my %arg  = @_;
-
-    # undefined data
-    undef $self->{ret};
-    undef $self->{html};
-    undef $self->{blocks};
-
-    # catch url or string
-    $self->{html} = defined $arg{string} ? $arg{string} : get( $arg{url} );
-    $self->_guess_enc();
-
-    # tag cleaning
-    $self->_tag_cleaning();
-
-    # score
-    $self->_score();
-
-    return $self->{ret};
+sub parse {
+    my $self     = shift;
+    my $arg_type = $self->_detect_arg(@_);
+    if    ( $arg_type eq 'url' )      { $self->parse_url( $self->{url} ); }
+    elsif ( $arg_type eq 'response' ) { $self->parse_response( $self->{res} ); }
+    elsif ( $arg_type eq 'html' )     { $self->parse_html( $self->{html} ); }
+    else                              { croak("bad argument"); }
 }
 
-sub _initialize {
+sub parse_url {
     my $self = shift;
-
-    # set defaule value
-    $self->{ret_num}   ||= 1;
-    $self->{enc_type}  ||= '';
-    $self->{max_bytes} ||= '';
-    $self->{min_bytes} ||= '';
-    $self->{look_fine} ||= '';
-    $self->{debug}     ||= '';
+    my $url  = shift;
+    my $ua   = $self->_user_agent();
+    my $res  = $ua->get($url);
+    $self->parse_response($res);
 }
 
-sub _score {
+sub parse_response {
     my $self = shift;
-
-    my $root = HTML::TreeBuilder->new;
-    $root->parse( $self->{html} );
-
-    my $data;
-
-    if ( my $title = $root->find("title") ) {
-        $self->{ret}->{title} =
-          $self->{enc_type}
-          ? encode( $self->{enc_type}, $title->as_text )
-          : $title->as_text;
-    }
-
-    if ( my $desc = $root->look_down( _tag => 'meta', name => 'description' ) )
-    {
-        my $string = $desc->attr('content');
-        $string =~ s{<br>}{}xms;
-        $self->{ret}->{description} =
-          $self->{enc_type} ? encode( $self->{enc_type}, $string ) : $string;
-    }
-
-    my $i = 0;
-    my @ratio;
-    my @depth;
-    my @order;
-    for my $node ( $root->look_down( "_tag", qr/body|center|td|div/i ) ) {
-
-        my $html_length = bytes::length( $node->as_HTML );
-        my $text        = $node->as_text;
-        my $text_length = bytes::length($text);
-        my $text_ration = $text_length / ( $html_length + 0.001 );
-
-        next
-          if ( $self->{max_bytes} =~ /^[\d]+$/
-            && $text_length > $self->{max_bytes} );
-        next
-          if ( $self->{min_bytes} =~ /^[\d]+$/
-            && $text_length < $self->{min_bytes} );
-
-        my $a_count       = 0;
-        my $a_length      = 0;
-        my $option_count  = 0;
-        my $option_length = 0;
-        my %node_hash;
-
-        $self->_walk_tree( $node, \%node_hash ) if $self->{look_fine};
-
-        $node_hash{a_length}      ||= 0;
-        $node_hash{option_length} ||= 0;
-        $node_hash{text}          ||= $text;
-
-        next if $node_hash{text} !~ /[^ ]+/;
-
-        $data->[$i]->{contents} = $node_hash{text};
-
-        push( @ratio,
-            ( $text_length - $node_hash{a_length} - $node_hash{option_length} )
-              * $text_ration );
-        push( @depth, $node->depth() );
-
-        $i++;
-    }
-
-    for ( 0 .. $i ) {
-        push( @order, log( $i - $_ + 1 ) );
-    }
-
-    my %ratio = statshash @ratio;
-    my %depth = statshash @depth;
-    my %order = statshash @order;
-
-    # avoid memory leak
-    $root->delete();
-
-    no warnings;
-
-    my @sorted =
-      sort { $data->[$b]->{score} <=> $data->[$a]->{score} }
-      map {
-
-        my $ratio_std =
-          ( $ratio[$_] - $ratio{mean} ) / ( $ratio{stddev} + 0.001 );
-        my $depth_std =
-          ( $depth[$_] - $depth{mean} ) / ( $depth{stddev} + 0.001 );
-        my $order_std =
-          ( $order[$_] - $order{mean} ) / ( $order{stddev} + 0.001 );
-
-        $data->[$_]->{score} = $ratio_std + $depth_std + $order_std;
-
-        if ( $self->{debug} ) {
-            $data->[$_]->{ratio_std} = $ratio_std;
-            $data->[$_]->{depth_std} = $depth_std;
-            $data->[$_]->{order_std} = $order_std;
-        }
-
-        $_;
-      } ( 0 .. $i );
-
-    $i = 0;
-    for (@sorted) {
-        if ( $self->{enc_type} ) {
-            $data->[$_]->{contents} =
-              encode( $self->{enc_type}, $data->[$_]->{contents} );
-            $data->[$_]->{score} =
-              encode( $self->{enc_type}, $data->[$_]->{score} );
-            if ( $self->{debug} ) {
-                $data->[$_]->{ratio_std} =
-                  encode( $self->{enc_type}, $data->[$_]->{ratio_std} );
-                $data->[$_]->{depth_std} =
-                  encode( $self->{enc_type}, $data->[$_]->{depth_std} );
-                $data->[$_]->{order_std} =
-                  encode( $self->{enc_type}, $data->[$_]->{order_std} );
-            }
-        }
-
-        $self->{ret}->{block}->[$i] = $data->[$_];
-
-        $i++;
-        last if $i == $self->{ret_num};
-    }
+    my $res  = shift;
+    $self->{res} = $res;
+    $self->_run();
 }
 
-sub _tag_cleaning {
+sub parse_html {
     my $self = shift;
-
-    return unless $self->{html};
-
-    # preprocessing
-    $self->{html} =~ s{<!-.*?->}{}xmsg;
-    $self->{html} =~ s{&nbsp;}{ }xmg;
-    $self->{html} =~ s{&quot;}{\'}xmg;
-    $self->{html} =~ s{\r\n}{\n}xmg;
-    $self->{html} =~ s{^\s*(.+)$}{$1}xmg;
-    $self->{html} =~ s{^\t*(.+)$}{$1}xmg;
-
-    # control code ( 0x00 - 0x1F, and 0x7F on ascii)
-    for ( 0 .. 31 ) {
-        my $control_code = '\x' . sprintf( "%x", $_ );
-        $self->{html} =~ s{$control_code}{}xmg;
-    }
-    $self->{html} =~ s{\x7f}{}xmg;
-
-}
-
-sub _walk_tree {
-    my $self          = shift;
-    my $node          = shift;
-    my $node_hash_ref = shift;
-
-    if ( ref $node ) {
-        if ( $node->tag =~ /p|br|hr|tr|ul|li|ol|dl|dd/ ) {
-
-            # print "\n";
-            $node_hash_ref->{text} .= "\n";
-        }
-        if ( $node->tag eq 'a' ) {
-            $node_hash_ref->{a_length} += bytes::length( $node->as_text );
-        }
-        if ( $node->tag eq 'option' ) {
-            $node_hash_ref->{option_length} += bytes::length( $node->as_text );
-        }
-        $self->_walk_tree( $_, $node_hash_ref ) for $node->content_list();
-    }
-    else {
-        $node_hash_ref->{text} .= $node . " ";
-    }
-}
-
-sub _guess_enc {
-    my $self = shift;
-    my $html = $self->{html};
-    $Encode::Guess::NoUTFAutoGuess = 1;
-    my $guess =
-      Encode::Guess::guess_encoding( $html,
-        ( 'shiftjis', 'euc-jp', '7bit-jis', 'utf8' ) );
-    unless ( ref $guess ) {
-        $html = decode( "utf8", $html );
-    }
-    else {
-        eval { $html = $guess->decode($html); };
-    }
+    my $html = shift;
     $self->{html} = $html;
+    $self->_run();
+}
+
+sub _run {
+    my $self = shift;
+    $self->_detect_enc();
+    $engine ||= do {
+        my $engine_module = $self->{engine} ? $self->{engine} : 'TagStructure';
+        my $class = __PACKAGE__ . '::Engine::' . $engine_module;
+        $class->require or die $@;
+        $class->new;
+    };
+    $engine->run($self);
+}
+
+sub _detect_arg {
+    my $self = shift;
+    my $argc = @_;
+    if ( $argc < 0 ) {
+        die "parse() needs more than one params";
+    }
+    delete $self->{url}  if defined $self->{url};
+    delete $self->{res}  if defined $self->{res};
+    delete $self->{html} if defined $self->{html};
+    my $return;
+    my $arg = shift;
+    if ( $arg eq 'url' ) {
+        $self->{url} = shift;
+        $return = 'url';
+    }
+    elsif ( $arg eq 'string' ) {
+        $self->{html} = shift;
+        $return = 'html';
+    }
+    else {
+        if ( ( blessed $arg) and qw/HTTP::Response/ ) {
+            $self->{res} = $arg;
+            $return = 'response';
+        }
+        elsif ( $arg =~ /^http/ ) { $self->{url}  = $arg; $return = 'url'; }
+        else                      { $self->{html} = $arg; $return = 'html'; }
+    }
+    my $param = shift;
+    if ( ref $param eq 'HASH' ) {
+        while ( my ( $key, $value ) = each %$param ) {
+            $self->{$key} = $value;
+        }
+    }
+    return $return;
+}
+
+sub _detect_enc {
+    my $self = shift;
+    if ( my $res = $self->{res} ) {
+        if ( $res->is_success ) {
+            my @encoding = (
+                $res->encoding,
+
+           # could be multiple because HTTP response and META might be different
+                ( $res->header('Content-Type') =~ /charset=([\w\-]+)/g ),
+                "latin-1",
+            );
+            my $encoding =
+              first { defined $_ && Encode::find_encoding($_) } @encoding;
+            $self->{html} = Encode::decode( $encoding, $res->content );
+        }
+    }
+    else {
+        my $html = $self->{html};
+        $Encode::Guess::NoUTFAutoGuess = 1;
+        my $guess =
+          Encode::Guess::guess_encoding( $html,
+            ( 'shiftjis', 'euc-jp', '7bit-jis', 'utf8' ) );
+        unless ( ref $guess ) {
+            $html = Encode::decode( "latin-1", $html );
+        }
+        else {
+            eval { $html = $guess->decode($html); };
+        }
+        $self->{html} = $html;
+    }
+}
+
+sub _user_agent {
+    my $self = shift;
+    require LWP::UserAgent;
+    $UserAgent ||= LWP::UserAgent->new();
+    return $UserAgent;
+}
+
+sub feature {
+    my $self   = __PACKAGE__->new;
+    my $result = $self->parse(@_);
+    my %ret    = (
+        text  => $result->text,
+        title => $result->title,
+        desc  => $result->desc
+    );
+    return wantarray ? %ret : $ret{text};
+}
+
+sub extract {
+    warn
+"HTML::Feature::extract() has been deprecated. Use HTML::Feature::parse() instead";
+    my $self   = shift;
+    my $result = $self->parse(@_);
+    my $ret    = {
+        title       => $result->title,
+        description => $result->desc,
+        block       => [ { contents => $result->text } ],
+    };
+    return $ret;
 }
 
 1;
@@ -248,78 +172,145 @@ __END__
 
 =head1 NAME
 
-HTML::Feature - an extractor of feature sentence from HTML 
+HTML::Feature - Extract Feature Sentences From HTML Documents
 
 =head1 SYNOPSIS
 
-    use strict;
     use HTML::Feature;
 
-    my $f = HTML::Feature->new(ret_num => 10);
-    my $data = $f->extract( url => 'http://www.perl.com' );
+    my $f = HTML::Feature->new(enc_type => 'utf8');
+    my $result = $f->parse('http://www.perl.com');
 
-    # print result data
+    # or $f->parse($html);
 
-    print $data->{title}, "\n";
-    print $data->{description}, "\n";
-
-    for(@{$data->{block}}){
-        print $_->{score}, "\n";
-        print $_->{contents}, "\n";
-    }
+    print "Title:"        , $result->title(), "\n";
+    print "Description:"  , $result->desc(),  "\n";
+    print "Featured Text:", $result->text(),  "\n";
 
 
-=head1 DESCRIPTION
 
-This module extracts some feature blocks from an HTML document. I do not adopt general technique such as "morphological analysis" in this module. 
-By simpler statistics processing, this module will extract a feature blocks. So, it may be able to apply it in a language of any country easily.
+    # a simpler method is, 
 
-=head1 METHODS
+    use HTML::Feature;
+    print feature('http://www.perl.com');
+
+    # very simple!
+
+
+=head1 DESCRIPTION 
+
+This module extracst blocks of feature sentences out of an HTML document. 
+
+Unlike other modules that performs similar tasks, this module by default
+extracts blocks without using morphological analysis, and instead it uses 
+simple statistics processing. 
+
+Because of this, HTML::Feature has an advantage over other similar modules 
+in that it can be applied to documents in any language.
+
+=head1 METHODS 
+
+=head2 new()
+
+    my $f = HTML::Feature->new(%param);
+    my $f = HTML::Feature->new(
+        engine => $class, # backend engine module (default: 'TagStructure') 
+        max_bytes => 5000, # max number of bytes per node to analyze (default: '')
+        min_bytes => 10, # minimum number of bytes per node to analyze (default is '')
+        enc_type => 'euc-jp', # encoding of return values (default: 'utf-8')
+   );
+
+Instantiates a new HTML::Feature object. Takes the following parameters
 
 =over 4
 
-=item new([options])
+=item engine
 
-a object is made by using the options.
+Specifies the class name of the engine that you want to use.
 
-=item extract(url => $url | string => $string)
+HTML::Feature is designed to accept different engines to change its behavior.
+If you want to customize the behavior of HTML::Feature, specify your own
+engine in this parameter
 
-return feature blocks (references) with TITLE and DESCRIPTION.
+=back 
 
-=head1 OPTIONS
+The rest of the arguments are directly passed to the HTML::Feature::Engine 
+object constructor.
 
-    # it is possible to set value to the constructor
-    my $f = HTML::Feature->new(
-	ret_num => 1, 
-	# number of return blocks (default is '1').
-	max_bytes => 5000,
-	# The upper limit number of bytes of a node to analyze (default is '').
-	min_bytes => 10, 
-	# The bottom limit number (default is '').
-	enc_type => 'euc-jp', 
-	# An arbitrary character code, If there is not appointment in particular, I become the character code which an UTF-8 flag is with (default is '').
-	look_fine => 1; 
-	# return data as "look fine" (default is ''). 
-   );
+=head2 parse()
+
+    my $result = $f->parse($url);
+    # or
+    my $result = $f->parse($html);
+    # or
+    my $result = $f->parse($http_response);
+
+Parses the given argument. The argument can be either a URL, a string of HTML,
+or an HTTP::Response object. HTML::Feature will detect and delegate to the
+appropriate method (see below)
+
+=head2 parse_url($url)
+
+Parses an URL. This method will use LWP::UserAgent to fetch the given url.
+
+=head2 parse_html($html)
+
+Parses a string containing HTML.
+
+=head2 parse_response($http_response)
+
+Parses an HTTP::Response object.
+
+=head2 extract()
+
+    $data = $f->extract(url => $url);
+    # or
+    $data = $f->extract(string => $html);
+
+HTML::Feature::extract() has been deprecated and exists for backwards compatiblity only. Use HTML::Feature::parse() instead.
+
+extract() extracts blocks of feature sentences from the given document,
+and returns a data structure like this:
+
+    $data = {
+        title => $title,
+        description => $desc,
+        block => [
+            {
+                contents => $contents,
+                score => $score
+            },
+            .
+            .
+        ]
+    }
+
+=head2 feature
+
+feature() is a simple wrapper that does new(), parse() in one step.
+If you do not require complex operations, simply calling this will suffice.
+In scalar context, it returns the feature text only. In list context,
+some more meta data will be returned as a hash.
+
+This function is exported on demand.
+
+    use HTML::Feature qw(feature);
+    print scalar feature($url);  # print featured text
+
+    my %data = feature($url); # wantarray(hash)
+    print $data{title};
+    print $data{desc};
+    print $data{text};
 
 
-=head1 SEE ALSO
+=head1 AUTHOR 
 
-L<HTML::TreeBuilder>,L<Statistics::Lite>,L<Encode::Guess>
+Takeshi Miki <miki@cpan.org> 
 
-
-=head1 AUTHOR
-
-Takeshi Miki <miki@cpan.org>
+Special thanks to Daisuke Maki
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2007 Takeshi Miki 
-
-This library is free software; you can redistribute it and/or modify
-it under the same terms as Perl itself, either Perl version 5.8.8 or,
-at your option, any later version of Perl 5 you may have available.
-
+Copyright (C) 2007 Takeshi Miki This library is free software; you can redistribute it and/or modifyit under the same terms as Perl itself, either Perl version 5.8.8 or,at your option, any later version of Perl 5 you may have available.
 
 =cut
-
