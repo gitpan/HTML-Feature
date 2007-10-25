@@ -10,7 +10,7 @@ use List::Util qw(first);
 use Scalar::Util qw(blessed);
 use UNIVERSAL::require;
 
-$VERSION = '2.0.1';
+$VERSION   = '2.0.2';
 @EXPORT_OK = qw(feature);
 
 sub new {
@@ -139,6 +139,7 @@ sub _user_agent {
     my $self = shift;
     require LWP::UserAgent;
     $UserAgent ||= LWP::UserAgent->new();
+    $self->{http_proxy} and $UserAgent->proxy( ['http'], $self->{http_proxy} );
     return $UserAgent;
 }
 
@@ -191,8 +192,8 @@ HTML::Feature - Extract Feature Sentences From HTML Documents
 
     # a simpler method is, 
 
-    use HTML::Feature;
-    print feature('http://www.perl.com');
+    use HTML::Feature qw(feature);
+    print scalar feature('http://www.perl.com');
 
     # very simple!
 
@@ -218,6 +219,7 @@ in that it can be applied to documents in any language.
         max_bytes => 5000, # max number of bytes per node to analyze (default: '')
         min_bytes => 10, # minimum number of bytes per node to analyze (default is '')
         enc_type => 'euc-jp', # encoding of return values (default: 'utf-8')
+        http_proxy => 'http://proxy:3128', # http proxy server (default: '')
    );
 
 Instantiates a new HTML::Feature object. Takes the following parameters

@@ -1,5 +1,8 @@
 Revision history for Perl extension HTML::Feature.
 
+2.0.2  2007.10.25
+    - set 'http_proxy' option 
+
 2.0.1  2007.10.16
     - rewrite all code
 
