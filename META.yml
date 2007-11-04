@@ -1,12 +1,13 @@
 --- 
 abstract: Extract Feature Sentences From HTML Documents
-author: "Takeshi Miki <miki@cpan.org> "
+author: 
+  - "Takeshi Miki <miki@cpan.org> "
 build_requires: 
   FindBin: 0
   Path::Class: 0
   Test::More: 0
 distribution_type: module
-generated_by: Module::Install version 0.67
+generated_by: Module::Install version 0.68
 license: perl
 meta-spec: 
   url: http://module-build.sourceforge.net/META-spec-v1.3.html
@@ -28,4 +29,4 @@ requires:
   Statistics::Lite: 0
   UNIVERSAL::require: 0
 tests: t/*.t t/*/*.t
-version: 2.0.2
+version: 2.0.3

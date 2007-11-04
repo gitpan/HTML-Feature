@@ -1,5 +1,8 @@
 Revision history for Perl extension HTML::Feature.
 
+2.0.3  2007.11.05
+    - add HTML::Element object as data type of return value
+
 2.0.2  2007.10.25
     - set 'http_proxy' option 
 

@@ -5,18 +5,19 @@ use base qw(HTML::Feature::Engine);
 use HTML::TreeBuilder;
 use Statistics::Lite qw(statshash);
 
-sub run{
+sub run {
     my $self = shift;
-    my $c = shift;
+    my $c    = shift;
     $self->_tag_cleaning($c);
     $self->_score($c);
     return $self;
-} 
+}
 
 sub _tag_cleaning {
     my $self = shift;
-    my $c = shift;
+    my $c    = shift;
     return unless $c->{html};
+
     # preprocessing
     $c->{html} =~ s{<!-.*?->}{}xmsg;
     $c->{html} =~ s{<script[^>]*>.*?<\/script>}{}xmgs;
@@ -25,6 +26,7 @@ sub _tag_cleaning {
     $c->{html} =~ s{\r\n}{\n}xmg;
     $c->{html} =~ s{^\s*(.+)$}{$1}xmg;
     $c->{html} =~ s{^\t*(.+)$}{$1}xmg;
+
     # control code ( 0x00 - 0x1F, and 0x7F on ascii)
     for ( 0 .. 31 ) {
         my $control_code = '\x' . sprintf( "%x", $_ );
@@ -35,7 +37,7 @@ sub _tag_cleaning {
 
 sub _score {
     my $self = shift;
-    my $c = shift;
+    my $c    = shift;
     my $root = HTML::TreeBuilder->new;
     $root->parse( $c->{html} );
 
@@ -80,18 +82,27 @@ sub _score {
 
         $self->_walk_tree( $node, \%node_hash );
 
-        $node_hash{a_length}      ||= 0;
-        $node_hash{option_length} ||= 0;
-        $node_hash{text}          ||= $text;
+        $node_hash{a_length}            ||= 0;
+        $node_hash{option_length}       ||= 0;
+        $node_hash{short_string_length} ||= 0;
+        $node_hash{text}                ||= $text;
 
         next if $node_hash{text} !~ /[^ ]+/;
 
         $data->[$i]->{text} = $node_hash{text};
 
-        push( @ratio,
-            ( $text_length - $node_hash{a_length} - $node_hash{option_length} )
-              * $text_ration );
+        push(
+            @ratio,
+            (
+                $text_length -
+                  $node_hash{a_length} -
+                  $node_hash{option_length} -
+                  $node_hash{short_string_length}
+              ) * $text_ration
+        );
         push( @depth, $node->depth() );
+
+        $data->[$i]->{element} = $node;
 
         $i++;
     }
@@ -105,7 +116,7 @@ sub _score {
     my %order = statshash @order;
 
     # avoid memory leak
-    $root->delete();
+    #$root->delete();
 
     no warnings;
 
@@ -125,11 +136,8 @@ sub _score {
       } ( 0 .. $i );
     $data->[ $sorted[0] ]->{text} =~ s/ $//s;
 
-    #for(@sorted){
-    #    print $data->[$_]->{text};
-    #    print "\n", "-" x 30, "\n";
-    #}
-    $self->{text} = $data->[ $sorted[0] ]->{text};
+    $self->{text}    = $data->[ $sorted[0] ]->{text};
+    $self->{element} = $data->[ $sorted[0] ]->{element};
 
     if ( $c->{enc_type} ) {
         $self->{title} = Encode::encode( $c->{enc_type}, $self->{title} );
@@ -148,11 +156,14 @@ sub _walk_tree {
         if ( $node->tag =~ /p|br|hr|tr|ul|li|ol|dl|dd/ ) {
             $node_hash_ref->{text} .= "\n";
         }
-        if ( $node->tag eq 'a' ) {
-            $node_hash_ref->{a_length} += bytes::length( $node->as_text );
+        for (qw/a option dt th/) {
+            if ( $node->tag eq $_ ) {
+                $node_hash_ref->{a_length} += bytes::length( $node->as_text );
+            }
         }
-        if ( $node->tag eq 'option' ) {
-            $node_hash_ref->{option_length} += bytes::length( $node->as_text );
+        if ( bytes::length( $node->as_text ) < 20 ) {
+            $node_hash_ref->{short_string_length} +=
+              bytes::length( $node->as_text );
         }
         $self->_walk_tree( $_, $node_hash_ref ) for $node->content_list();
     }

@@ -2,15 +2,15 @@ package HTML::Feature::Engine;
 use strict;
 use warnings;
 use base qw/Class::Accessor::Fast/;
-__PACKAGE__->mk_accessors(qw/text title desc/);
+__PACKAGE__->mk_accessors(qw/text title desc element/);
 
-sub new{
+sub new {
     my $class = shift;
     my $self = bless {@_}, $class;
     return $self;
 }
 
-sub run{}
+sub run { }
 
 1;
 

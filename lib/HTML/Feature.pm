@@ -10,7 +10,7 @@ use List::Util qw(first);
 use Scalar::Util qw(blessed);
 use UNIVERSAL::require;
 
-$VERSION   = '2.0.2';
+$VERSION   = '2.0.3';
 @EXPORT_OK = qw(feature);
 
 sub new {
@@ -147,9 +147,10 @@ sub feature {
     my $self   = __PACKAGE__->new;
     my $result = $self->parse(@_);
     my %ret    = (
-        text  => $result->text,
-        title => $result->title,
-        desc  => $result->desc
+        text    => $result->text,
+        title   => $result->title,
+        desc    => $result->desc,
+        element => $result->element
     );
     return wantarray ? %ret : $ret{text};
 }
@@ -187,8 +188,7 @@ HTML::Feature - Extract Feature Sentences From HTML Documents
     print "Title:"        , $result->title(), "\n";
     print "Description:"  , $result->desc(),  "\n";
     print "Featured Text:", $result->text(),  "\n";
-
-
+    print "HTML Element:",  $result->element->as_HTML, "\n";
 
     # a simpler method is, 
 
@@ -303,6 +303,7 @@ This function is exported on demand.
     print $data{title};
     print $data{desc};
     print $data{text};
+    print $data{element}->as_HTML;
 
 
 =head1 AUTHOR 
