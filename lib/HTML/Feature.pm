@@ -9,8 +9,9 @@ use Encode::Guess;
 use List::Util qw(first);
 use Scalar::Util qw(blessed);
 use UNIVERSAL::require;
+use URI;
 
-$VERSION   = '2.0.3';
+$VERSION   = '2.00004_00';
 @EXPORT_OK = qw(feature);
 
 sub new {
@@ -25,12 +26,39 @@ sub new {
 }
 
 sub parse {
-    my $self     = shift;
-    my $arg_type = $self->_detect_arg(@_);
-    if    ( $arg_type eq 'url' )      { $self->parse_url( $self->{url} ); }
-    elsif ( $arg_type eq 'response' ) { $self->parse_response( $self->{res} ); }
-    elsif ( $arg_type eq 'html' )     { $self->parse_html( $self->{html} ); }
-    else                              { croak("bad argument"); }
+    my $self = shift;
+    my $obj  = shift;
+
+    if (! $obj) {
+        croak('Usage: parse( $uri | $http_response | $html_ref )');
+    }
+
+    my $pkg  = blessed($obj);
+    if (! $pkg) {
+        if (my $ref = ref $obj) {
+            # if it's a scalar reference, then we've been passed a piece of
+            # HTML code. 
+            if ($ref eq 'SCALAR') {
+                return $self->parse_html( $obj, @_ );
+            }
+
+            # Otherwise we don't know how to handle
+            croak('Usage: parse( $uri | $http_response | $html_ref )');
+        }
+
+        # We seemed to have an unblessed scalar. Assume it's a URI
+        $pkg = 'URI';
+        $obj = URI->new($obj);
+    }
+
+    # If it's an object, then we can handle URI or HTTP::Response
+    if ($pkg->isa('URI')) {
+        return $self->parse_url( $obj, @_ );
+    } elsif ($pkg->isa('HTTP::Response')) {
+        return $self->parse_response( $obj, @_ );
+    } else {
+        croak('Usage: parse( $uri | $http_response | $html_ref )');
+    }
 }
 
 sub parse_url {
@@ -38,100 +66,78 @@ sub parse_url {
     my $url  = shift;
     my $ua   = $self->_user_agent();
     my $res  = $ua->get($url);
-    $self->parse_response($res);
+    $self->parse_response($res, @_);
 }
 
 sub parse_response {
     my $self = shift;
     my $res  = shift;
-    $self->{res} = $res;
-    $self->_run();
+    my $content = $self->_decode_response($res);
+    $self->_run( \$content, @_ );
 }
 
 sub parse_html {
     my $self = shift;
     my $html = shift;
-    $self->{html} = $html;
-    $self->_run();
+    my $html_ref = ref $html ? $html : \$html;
+    $self->_decode_htmlref( $html_ref );
+    $self->_run( $html_ref, @_ );
 }
 
-sub _run {
-    my $self = shift;
-    $self->_detect_enc();
-    $engine ||= do {
+sub engine
+{
+    my $self   = shift;
+    my $engine = $self->{engine};
+    if (! $engine) {
         my $engine_module = $self->{engine} ? $self->{engine} : 'TagStructure';
         my $class = __PACKAGE__ . '::Engine::' . $engine_module;
         $class->require or die $@;
-        $class->new;
-    };
-    $engine->run($self);
+        $engine = $class->new;
+        $self->{engine} = $engine;
+    }
+    return $engine;
 }
 
-sub _detect_arg {
-    my $self = shift;
-    my $argc = @_;
-    if ( $argc < 0 ) {
-        die "parse() needs more than one params";
-    }
-    delete $self->{url}  if defined $self->{url};
-    delete $self->{res}  if defined $self->{res};
-    delete $self->{html} if defined $self->{html};
-    my $return;
-    my $arg = shift;
-    if ( $arg eq 'url' ) {
-        $self->{url} = shift;
-        $return = 'url';
-    }
-    elsif ( $arg eq 'string' ) {
-        $self->{html} = shift;
-        $return = 'html';
-    }
-    else {
-        if ( ( blessed $arg) and qw/HTTP::Response/ ) {
-            $self->{res} = $arg;
-            $return = 'response';
-        }
-        elsif ( $arg =~ /^http/ ) { $self->{url}  = $arg; $return = 'url'; }
-        else                      { $self->{html} = $arg; $return = 'html'; }
-    }
-    my $param = shift;
-    if ( ref $param eq 'HASH' ) {
-        while ( my ( $key, $value ) = each %$param ) {
-            $self->{$key} = $value;
-        }
-    }
-    return $return;
+sub _run {
+    my $self     = shift;
+    my $html_ref = shift;
+    my $opts     = shift || {};
+
+    local $self->{element_flag} = exists $opts->{element_flag} ? $opts->{element_flag} : $self->{element_flag};
+    local $self->{cache} = exists $opts->{cache} ? $opts->{cache} : 1;
+    $self->engine->run($self, $html_ref);
 }
 
-sub _detect_enc {
+sub _decode_response
+{
     my $self = shift;
-    if ( my $res = $self->{res} ) {
-        if ( $res->is_success ) {
-            my @encoding = (
-                $res->encoding,
+    my $res  = shift;
 
-           # could be multiple because HTTP response and META might be different
-                ( $res->header('Content-Type') =~ /charset=([\w\-]+)/g ),
-                "latin-1",
-            );
-            my $encoding =
-              first { defined $_ && Encode::find_encoding($_) } @encoding;
-            $self->{html} = Encode::decode( $encoding, $res->content );
-        }
-    }
-    else {
-        my $html = $self->{html};
-        $Encode::Guess::NoUTFAutoGuess = 1;
-        my $guess =
-          Encode::Guess::guess_encoding( $html,
+    my @encoding = (
+        $res->encoding,
+        # XXX - falling back to latin-1 may be risky. See Data::Decode
+        # could be multiple because HTTP response and META might be different
+        ( $res->header('Content-Type') =~ /charset=([\w\-]+)/g ),
+        "latin-1",
+    );
+    my $encoding =
+        first { defined $_ && Encode::find_encoding($_) } @encoding;
+    return Encode::decode( $encoding, $res->content );
+}
+
+sub _decode_htmlref
+{
+    my $self = shift;
+    my $html_ref = shift;
+
+    local $Encode::Guess::NoUTFAutoGuess = 1;
+    my $guess =
+        Encode::Guess::guess_encoding( $$html_ref,
             ( 'shiftjis', 'euc-jp', '7bit-jis', 'utf8' ) );
-        unless ( ref $guess ) {
-            $html = Encode::decode( "latin-1", $html );
-        }
-        else {
-            eval { $html = $guess->decode($html); };
-        }
-        $self->{html} = $html;
+    unless ( ref $guess ) {
+        $$html_ref = Encode::decode( "latin-1", $$html_ref );
+    } else {
+        eval { $$html_ref = $guess->decode($$html_ref); };
     }
 }
 
@@ -159,7 +165,8 @@ sub extract {
     warn
 "HTML::Feature::extract() has been deprecated. Use HTML::Feature::parse() instead";
     my $self   = shift;
-    my $result = $self->parse(@_);
+    my %args   = @_;
+    my $result = $self->parse( $args{string} ? \$args{string} : $args{url} );
     my $ret    = {
         title       => $result->title,
         description => $result->desc,
@@ -183,12 +190,18 @@ HTML::Feature - Extract Feature Sentences From HTML Documents
     my $f = HTML::Feature->new(enc_type => 'utf8');
     my $result = $f->parse('http://www.perl.com');
 
-    # or $f->parse($html);
-
     print "Title:"        , $result->title(), "\n";
     print "Description:"  , $result->desc(),  "\n";
     print "Featured Text:", $result->text(),  "\n";
+
+
+    # you can get a HTML::Element object
+ 
+    my $f = HTML::Feature->new();
+    my $result = $f->parse('http://www.perl.com',{element_flag => 1});
     print "HTML Element:",  $result->element->as_HTML, "\n";
+    $result->element_delete();
+
 
     # a simpler method is, 
 
@@ -220,6 +233,7 @@ in that it can be applied to documents in any language.
         min_bytes => 10, # minimum number of bytes per node to analyze (default is '')
         enc_type => 'euc-jp', # encoding of return values (default: 'utf-8')
         http_proxy => 'http://proxy:3128', # http proxy server (default: '')
+        element_flag => 1, # flag of HTML::Element object as returned value (default: '') 
    );
 
 Instantiates a new HTML::Feature object. Takes the following parameters
@@ -243,13 +257,13 @@ object constructor.
 
     my $result = $f->parse($url);
     # or
-    my $result = $f->parse($html);
+    my $result = $f->parse($html_ref);
     # or
     my $result = $f->parse($http_response);
 
-Parses the given argument. The argument can be either a URL, a string of HTML,
-or an HTTP::Response object. HTML::Feature will detect and delegate to the
-appropriate method (see below)
+Parses the given argument. The argument can be either a URL, a string of HTML
+(must be passed as a scalar reference), or an HTTP::Response object.
+HTML::Feature will detect and delegate to the appropriate method (see below)
 
 =head2 parse_url($url)
 
@@ -303,7 +317,6 @@ This function is exported on demand.
     print $data{title};
     print $data{desc};
     print $data{text};
-    print $data{element}->as_HTML;
 
 
 =head1 AUTHOR 

@@ -1,5 +1,14 @@
 Revision history for Perl extension HTML::Feature.
 
+    - change the calling semantics of parse(). Now it accepts an URI
+      string/object, an HTTP::Response object, or a scalar ref, which in
+      case will be interpreted as raw HTML.
+    - localize $Encode::Guess::NoUTFAutoGuess
+    - no longer store parse data in the instance
+    - introduce HTML::Feature::Result
+    - fix memory leaks caused by HTML::Element
+    - use caching when traversing HTML tree
+
 2.0.3  2007.11.05
     - add HTML::Element object as data type of return value
 

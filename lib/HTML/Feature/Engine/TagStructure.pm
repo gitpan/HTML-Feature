@@ -4,62 +4,65 @@ use warnings;
 use base qw(HTML::Feature::Engine);
 use HTML::TreeBuilder;
 use Statistics::Lite qw(statshash);
+use HTML::Feature::Result;
 
 sub run {
     my $self = shift;
     my $c    = shift;
-    $self->_tag_cleaning($c);
-    $self->_score($c);
-    return $self;
+    my $html_ref = shift;
+    $self->_tag_cleaning($c, $html_ref);
+    return $self->_score($c, $html_ref);
 }
 
 sub _tag_cleaning {
     my $self = shift;
     my $c    = shift;
-    return unless $c->{html};
+    my $html_ref = shift;
+    return unless $html_ref && $$html_ref;
 
     # preprocessing
-    $c->{html} =~ s{<!-.*?->}{}xmsg;
-    $c->{html} =~ s{<script[^>]*>.*?<\/script>}{}xmgs;
-    $c->{html} =~ s{&nbsp;}{ }xmg;
-    $c->{html} =~ s{&quot;}{\'}xmg;
-    $c->{html} =~ s{\r\n}{\n}xmg;
-    $c->{html} =~ s{^\s*(.+)$}{$1}xmg;
-    $c->{html} =~ s{^\t*(.+)$}{$1}xmg;
+    $$html_ref =~ s{<!-.*?->}{}xmsg;
+    $$html_ref =~ s{<script[^>]*>.*?<\/script>}{}xmgs;
+    $$html_ref =~ s{&nbsp;}{ }xmg;
+    $$html_ref =~ s{&quot;}{\'}xmg;
+    $$html_ref =~ s{\r\n}{\n}xmg;
+    $$html_ref =~ s{^\s*(.+)$}{$1}xmg;
+    $$html_ref =~ s{^\t*(.+)$}{$1}xmg;
 
     # control code ( 0x00 - 0x1F, and 0x7F on ascii)
     for ( 0 .. 31 ) {
         my $control_code = '\x' . sprintf( "%x", $_ );
-        $c->{html} =~ s{$control_code}{}xmg;
+        $$html_ref =~ s{$control_code}{}xmg;
     }
-    $c->{html} =~ s{\x7f}{}xmg;
+    $$html_ref =~ s{\x7f}{}xmg;
 }
 
 sub _score {
     my $self = shift;
     my $c    = shift;
-    my $root = HTML::TreeBuilder->new;
-    $root->parse( $c->{html} );
+    my $html_ref = shift;
+    my $root = HTML::TreeBuilder->new_from_content( $$html_ref );
+    my $result = HTML::Feature::Result->new;
 
     my $data;
 
     if ( my $title = $root->find("title") ) {
-        $self->{title} = $title->as_text;
+        $result->title($title->as_text);
     }
 
     if ( my $desc = $root->look_down( _tag => 'meta', name => 'description' ) )
     {
         my $string = $desc->attr('content');
         $string =~ s{<br>}{}xms;
-        $self->{desc} = $string;
+        $result->desc($string);
     }
 
     my $i = 0;
     my @ratio;
     my @depth;
     my @order;
+    my $CACHE = $c->{cache} ? {} : undef;
     for my $node ( $root->look_down( "_tag", qr/body|center|td|div/i ) ) {
-
         my $html_length = bytes::length( $node->as_HTML );
         my $text        = $node->as_text;
         my $text_length = bytes::length($text);
@@ -78,9 +81,13 @@ sub _score {
         my $a_length      = 0;
         my $option_count  = 0;
         my $option_length = 0;
-        my %node_hash;
+        my %node_hash = (
+            text => '',
+            a_length => 0,
+            short_string_length => 0
+        );
 
-        $self->_walk_tree( $node, \%node_hash );
+        $self->_walk_tree( $node, \%node_hash, $CACHE );
 
         $node_hash{a_length}            ||= 0;
         $node_hash{option_length}       ||= 0;
@@ -106,6 +113,7 @@ sub _score {
 
         $i++;
     }
+    undef $CACHE;
 
     for ( 0 .. $i ) {
         push( @order, log( $i - $_ + 1 ) );
@@ -116,60 +124,86 @@ sub _score {
     my %order = statshash @order;
 
     # avoid memory leak
-    #$root->delete();
-
-    no warnings;
+    $root->delete() unless $c->{element_flag};
 
     my @sorted =
       sort { $data->[$b]->{score} <=> $data->[$a]->{score} }
       map {
 
         my $ratio_std =
-          ( $ratio[$_] - $ratio{mean} ) / ( $ratio{stddev} + 0.001 );
+          ( ($ratio[$_] || 0) - ($ratio{mean} || 0) ) / ( $ratio{stddev} + 0.001 );
         my $depth_std =
-          ( $depth[$_] - $depth{mean} ) / ( $depth{stddev} + 0.001 );
+          ( ($depth[$_] || 0) - ($depth{mean} || 0) ) / ( $depth{stddev} + 0.001 );
         my $order_std =
-          ( $order[$_] - $order{mean} ) / ( $order{stddev} + 0.001 );
+          ( ($order[$_] || 0) - ($order{mean} || 0) ) / ( $order{stddev} + 0.001 );
 
         $data->[$_]->{score} = $ratio_std + $depth_std + $order_std;
         $_;
       } ( 0 .. $i );
     $data->[ $sorted[0] ]->{text} =~ s/ $//s;
 
-    $self->{text}    = $data->[ $sorted[0] ]->{text};
-    $self->{element} = $data->[ $sorted[0] ]->{element};
+    $result->text($data->[ $sorted[0] ]->{text});
 
-    if ( $c->{enc_type} ) {
-        $self->{title} = Encode::encode( $c->{enc_type}, $self->{title} );
-        $self->{desc}  = Encode::encode( $c->{enc_type}, $self->{desc} );
-        $self->{text}  = Encode::encode( $c->{enc_type}, $self->{text} );
+    if ($c->{element_flag}) {
+        $result->root($root);
+        $result->element($data->[ $sorted[0] ]->{element});
     }
 
+    if ( $c->{enc_type} ) {
+        $result->title( Encode::encode( $c->{enc_type}, $result->title ) );
+        $result->desc( Encode::encode( $c->{enc_type}, $result->desc ) );
+        $result->text( Encode::encode( $c->{enc_type}, $result->text ) );
+    }
+
+    return $result;
 }
 
 sub _walk_tree {
     my $self          = shift;
     my $node          = shift;
     my $node_hash_ref = shift;
+    my $CACHE         = shift;
 
-    if ( ref $node ) {
-        if ( $node->tag =~ /p|br|hr|tr|ul|li|ol|dl|dd/ ) {
-            $node_hash_ref->{text} .= "\n";
-        }
-        for (qw/a option dt th/) {
-            if ( $node->tag eq $_ ) {
-                $node_hash_ref->{a_length} += bytes::length( $node->as_text );
+    my $data = $CACHE->{ $node };
+    if ( ! $data) {
+        $data = {
+            text => '',
+            a_length => 0,
+            short_string_length => 0,
+        };
+
+        if ( ref $node ) {
+            my $text_len = bytes::length( $node->as_text );
+            my $tag      = $node->tag;
+            $data->{text_length} = $text_len;
+
+            if ( $tag =~ /p|br|hr|tr|ul|li|ol|dl|dd/ ) {
+                $data->{text} = "\n";
+            }
+            if ( $tag =~ /a|dt|th|option/) {
+                $data->{a_length} += $text_len;
+            }
+
+            if ( $text_len < 20 ) {
+                $data->{short_string_length} += $text_len;
             }
         }
-        if ( bytes::length( $node->as_text ) < 20 ) {
-            $node_hash_ref->{short_string_length} +=
-              bytes::length( $node->as_text );
+        else {
+            $data->{text} = $node . " ";
         }
-        $self->_walk_tree( $_, $node_hash_ref ) for $node->content_list();
+
+        $CACHE->{ $node } = $data;
     }
-    else {
-        $node_hash_ref->{text} .= $node . " ";
+
+    $node_hash_ref->{text}                .= $data->{text};
+    $node_hash_ref->{a_length}            += $data->{a_length};
+    $node_hash_ref->{short_string_length} += $data->{short_string_length};
+
+    if (ref $node) {
+        $self->_walk_tree( $_, $node_hash_ref, $CACHE )
+            for $node->content_list();
     }
+
 }
 
 1;
