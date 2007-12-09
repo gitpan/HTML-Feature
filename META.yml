@@ -28,4 +28,4 @@ requires:
   Statistics::Lite: 0
   UNIVERSAL::require: 0
 tests: t/*.t t/*/*.t
-version: 2.00004_00
+version: 2.00004

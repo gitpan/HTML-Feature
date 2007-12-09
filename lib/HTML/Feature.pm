@@ -11,7 +11,7 @@ use Scalar::Util qw(blessed);
 use UNIVERSAL::require;
 use URI;
 
-$VERSION   = '2.00004_00';
+$VERSION   = '2.00004';
 @EXPORT_OK = qw(feature);
 
 sub new {
@@ -19,7 +19,6 @@ sub new {
     my %arg   = @_;
     $class = ref $class || $class;
     my $self = bless \%arg, $class;
-
     $self->{enc_type} ||= 'utf8';
 
     return $self;
@@ -87,14 +86,14 @@ sub parse_html {
 sub engine
 {
     my $self   = shift;
-    my $engine = $self->{engine};
-    if (! $engine) {
+    my $engine = $self->{engine_obj};
+    if(! $engine){
         my $engine_module = $self->{engine} ? $self->{engine} : 'TagStructure';
         my $class = __PACKAGE__ . '::Engine::' . $engine_module;
         $class->require or die $@;
         $engine = $class->new;
-        $self->{engine} = $engine;
-    }
+        $self->{engine_obj} = $engine;
+    }    
     return $engine;
 }
 
@@ -104,7 +103,6 @@ sub _run {
     my $opts     = shift || {};
 
     local $self->{element_flag} = exists $opts->{element_flag} ? $opts->{element_flag} : $self->{element_flag};
-    local $self->{cache} = exists $opts->{cache} ? $opts->{cache} : 1;
     $self->engine->run($self, $html_ref);
 }
 

@@ -13,6 +13,7 @@ inc/Module/Install/WriteAll.pm
 lib/HTML/Feature.pm
 lib/HTML/Feature/Engine.pm
 lib/HTML/Feature/Engine/TagStructure.pm
+lib/HTML/Feature/Engine/TsubuanLike.pm
 lib/HTML/Feature/Result.pm
 Makefile.PL
 MANIFEST			This list of files
