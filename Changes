@@ -1,5 +1,7 @@
 Revision history for Perl extension HTML::Feature.
 
+2.00005 2008.08.15
+    - set 'timeout' option
 
 2.00004 2007.12.9
     - remove caching mechanism when traversing HTML tree

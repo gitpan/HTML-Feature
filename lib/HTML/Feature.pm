@@ -11,7 +11,7 @@ use Scalar::Util qw(blessed);
 use UNIVERSAL::require;
 use URI;
 
-$VERSION   = '2.00004';
+$VERSION   = '2.00005';
 @EXPORT_OK = qw(feature);
 
 sub new {
@@ -144,6 +144,7 @@ sub _user_agent {
     require LWP::UserAgent;
     $UserAgent ||= LWP::UserAgent->new();
     $self->{http_proxy} and $UserAgent->proxy( ['http'], $self->{http_proxy} );
+    $self->{timeout} and $UserAgent->timeout( $self->{timeout} );
     return $UserAgent;
 }
 
@@ -231,6 +232,7 @@ in that it can be applied to documents in any language.
         min_bytes => 10, # minimum number of bytes per node to analyze (default is '')
         enc_type => 'euc-jp', # encoding of return values (default: 'utf-8')
         http_proxy => 'http://proxy:3128', # http proxy server (default: '')
+        timeout => 10, # set the timeout value in seconds. (default: 180)
         element_flag => 1, # flag of HTML::Element object as returned value (default: '') 
    );
 
