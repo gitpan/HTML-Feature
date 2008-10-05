@@ -31,6 +31,7 @@ sub _tag_cleaning {
 
     # control code ( 0x00 - 0x1F, and 0x7F on ascii)
     for ( 0 .. 31 ) {
+        next if $_ == 10;# without NL(New Line)
         my $control_code = '\x' . sprintf( "%x", $_ );
         $$html_ref =~ s{$control_code}{}xmg;
     }
@@ -93,8 +94,6 @@ sub _score {
         $node_hash{short_string_length} ||= 0;
         $node_hash{text}                ||= $text;
 
-        next if $node_hash{text} !~ /[^ ]+/;
-
         $data->[$i]->{text} = $node_hash{text};
 
         push(
@@ -141,7 +140,8 @@ sub _score {
         $data->[$_]->{score} = $ratio_std + $depth_std + $order_std;
         $_;
       } ( 0 .. $i );
-    $data->[ $sorted[0] ]->{text} =~ s/ $//s;
+
+    $data->[ $sorted[0] ]->{text} and $data->[ $sorted[0] ]->{text} =~ s/ $//s;
 
     $result->text( $data->[ $sorted[0] ]->{text} );
 
@@ -152,8 +152,8 @@ sub _score {
 
     if ( $c->{enc_type} ) {
         $result->title( Encode::encode( $c->{enc_type}, $result->title ) );
-        $result->desc( Encode::encode( $c->{enc_type},  $result->desc ) );
-        $result->text( Encode::encode( $c->{enc_type},  $result->text ) );
+        $result->desc( Encode::encode( $c->{enc_type}, $result->desc ) );
+        $result->text( Encode::encode( $c->{enc_type}, $result->text ) );
     }
 
     return $result;
@@ -165,7 +165,7 @@ sub _walk_tree {
     my $node_hash_ref = shift;
 
     if ( ref $node ) {
-        if ( $node->tag =~ /p|br|hr|tr|ul|li|ol|dl|dd/ ) {
+        if ( $node->tag =~ /p|br|hr|tr|ul|li|ol|dl|dd|h[1-6]/ ) {
             $node_hash_ref->{text} .= "\n";
         }
         for (qw/a option dt th/) {
@@ -183,8 +183,6 @@ sub _walk_tree {
         $node_hash_ref->{text} .= $node . " ";
     }
 }
-
-
 
 1;
 

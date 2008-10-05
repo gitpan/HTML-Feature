@@ -26,8 +26,11 @@ t/03_run/data/sjis.html
 t/03_run/data/test.html
 t/03_run/data/utf8.html
 t/03_run/element.t
+t/03_run/engine.t
 t/03_run/oo.t
 t/03_run/simple.t
+t/03_run/ua.t
 t/99_kwalitee.t
 t/99_pod-coverage.t
 t/99_pod.t
+t/regression/join_several_words.t

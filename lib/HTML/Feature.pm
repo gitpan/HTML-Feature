@@ -11,7 +11,7 @@ use Scalar::Util qw(blessed);
 use UNIVERSAL::require;
 use URI;
 
-$VERSION   = '2.00005';
+$VERSION   = '2.00006';
 @EXPORT_OK = qw(feature);
 
 sub new {
@@ -28,16 +28,17 @@ sub parse {
     my $self = shift;
     my $obj  = shift;
 
-    if (! $obj) {
+    if ( !$obj ) {
         croak('Usage: parse( $uri | $http_response | $html_ref )');
     }
 
-    my $pkg  = blessed($obj);
-    if (! $pkg) {
-        if (my $ref = ref $obj) {
+    my $pkg = blessed($obj);
+    if ( !$pkg ) {
+        if ( my $ref = ref $obj ) {
+
             # if it's a scalar reference, then we've been passed a piece of
-            # HTML code. 
-            if ($ref eq 'SCALAR') {
+            # HTML code.
+            if ( $ref eq 'SCALAR' ) {
                 return $self->parse_html( $obj, @_ );
             }
 
@@ -51,11 +52,13 @@ sub parse {
     }
 
     # If it's an object, then we can handle URI or HTTP::Response
-    if ($pkg->isa('URI')) {
+    if ( $pkg->isa('URI') ) {
         return $self->parse_url( $obj, @_ );
-    } elsif ($pkg->isa('HTTP::Response')) {
+    }
+    elsif ( $pkg->isa('HTTP::Response') ) {
         return $self->parse_response( $obj, @_ );
-    } else {
+    }
+    else {
         croak('Usage: parse( $uri | $http_response | $html_ref )');
     }
 }
@@ -65,35 +68,35 @@ sub parse_url {
     my $url  = shift;
     my $ua   = $self->_user_agent();
     my $res  = $ua->get($url);
-    $self->parse_response($res, @_);
+    $self->parse_response( $res, @_ );
 }
 
 sub parse_response {
     my $self = shift;
     my $res  = shift;
+    $self->{base_url} = $res->base;
     my $content = $self->_decode_response($res);
     $self->_run( \$content, @_ );
 }
 
 sub parse_html {
-    my $self = shift;
-    my $html = shift;
+    my $self     = shift;
+    my $html     = shift;
     my $html_ref = ref $html ? $html : \$html;
-    $self->_decode_htmlref( $html_ref );
+    $self->_decode_htmlref($html_ref);
     $self->_run( $html_ref, @_ );
 }
 
-sub engine
-{
+sub engine {
     my $self   = shift;
     my $engine = $self->{engine_obj};
-    if(! $engine){
+    if ( !$engine ) {
         my $engine_module = $self->{engine} ? $self->{engine} : 'TagStructure';
         my $class = __PACKAGE__ . '::Engine::' . $engine_module;
         $class->require or die $@;
         $engine = $class->new;
         $self->{engine_obj} = $engine;
-    }    
+    }
     return $engine;
 }
 
@@ -102,39 +105,41 @@ sub _run {
     my $html_ref = shift;
     my $opts     = shift || {};
 
-    local $self->{element_flag} = exists $opts->{element_flag} ? $opts->{element_flag} : $self->{element_flag};
-    $self->engine->run($self, $html_ref);
+    local $self->{element_flag} =
+      exists $opts->{element_flag}
+      ? $opts->{element_flag}
+      : $self->{element_flag};
+    $self->engine->run( $self, $html_ref );
 }
 
-sub _decode_response
-{
+sub _decode_response {
     my $self = shift;
     my $res  = shift;
 
     my @encoding = (
         $res->encoding,
+
         # XXX - falling back to latin-1 may be risky. See Data::Decode
         # could be multiple because HTTP response and META might be different
         ( $res->header('Content-Type') =~ /charset=([\w\-]+)/g ),
         "latin-1",
     );
-    my $encoding =
-        first { defined $_ && Encode::find_encoding($_) } @encoding;
+    my $encoding = first { defined $_ && Encode::find_encoding($_) } @encoding;
     return Encode::decode( $encoding, $res->content );
 }
 
-sub _decode_htmlref
-{
-    my $self = shift;
+sub _decode_htmlref {
+    my $self     = shift;
     my $html_ref = shift;
 
     local $Encode::Guess::NoUTFAutoGuess = 1;
     my $guess =
-        Encode::Guess::guess_encoding( $$html_ref,
-            ( 'shiftjis', 'euc-jp', '7bit-jis', 'utf8' ) );
+      Encode::Guess::guess_encoding( $$html_ref,
+        ( 'shiftjis', 'euc-jp', '7bit-jis', 'utf8' ) );
     unless ( ref $guess ) {
         $$html_ref = Encode::decode( "latin-1", $$html_ref );
-    } else {
+    }
+    else {
         eval { $$html_ref = $guess->decode($$html_ref); };
     }
 }
@@ -143,8 +148,9 @@ sub _user_agent {
     my $self = shift;
     require LWP::UserAgent;
     $UserAgent ||= LWP::UserAgent->new();
+    $self->{user_agent} and $UserAgent->agent( $self->{user_agent} );
     $self->{http_proxy} and $UserAgent->proxy( ['http'], $self->{http_proxy} );
-    $self->{timeout} and $UserAgent->timeout( $self->{timeout} );
+    $self->{timeout}    and $UserAgent->timeout( $self->{timeout} );
     return $UserAgent;
 }
 
@@ -231,6 +237,7 @@ in that it can be applied to documents in any language.
         max_bytes => 5000, # max number of bytes per node to analyze (default: '')
         min_bytes => 10, # minimum number of bytes per node to analyze (default is '')
         enc_type => 'euc-jp', # encoding of return values (default: 'utf-8')
+        user_agent => 'my-agent-name', # LWP::UserAgent->agent (default: 'libwww-perl/#.##') 
         http_proxy => 'http://proxy:3128', # http proxy server (default: '')
         timeout => 10, # set the timeout value in seconds. (default: 180)
         element_flag => 1, # flag of HTML::Element object as returned value (default: '') 

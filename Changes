@@ -1,5 +1,13 @@
 Revision history for Perl extension HTML::Feature.
 
+
+2.00006 2008.10.05
+    - fix a bug that improperty joins of several words
+    - set 'user_agent' option
+    - an object of HTML::Feature::Engine can recognize the base_url
+      via context object ( $c->{base_url} )
+    - add test codes
+
 2.00005 2008.08.15
     - set 'timeout' option
 
