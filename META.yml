@@ -1,10 +1,8 @@
 ---
 abstract: 'Extract Feature Sentences From HTML Documents'
 author:
-  - 'Takeshi Miki <miki@cpan.org> '
+  - 'Takeshi Miki <miki@cpan.org>'
 build_requires:
-  FindBin: 0
-  Path::Class: 0
   Test::More: 0
 distribution_type: module
 generated_by: 'Module::Install version 0.77'
@@ -20,14 +18,20 @@ no_index:
 requires:
   Carp: 0
   Class::Accessor::Fast: 0
-  Encode::Guess: 0
-  HTML::TreeBuilder: 0
-  HTTP::Response::Encoding: 0
+  Class::Data::ConfigHash: 0
+  Data::Decode: 0.00007_01
+  Encode: 0
+  HTML::TreeBuilder::LibXML: 0
+  HTML::TreeBuilder::XPath: 0
+  HTTP::Request: 0
+  JSON: 0
+  LWP::Simple: 0
   LWP::UserAgent: 0
-  List::Util: 0
   Scalar::Util: 0
   Statistics::Lite: 0
+  Storable: 0
   UNIVERSAL::require: 0
+  URI: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 2.00006
+version: 3.00001

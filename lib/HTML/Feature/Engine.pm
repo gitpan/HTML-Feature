@@ -1,41 +1,93 @@
 package HTML::Feature::Engine;
 use strict;
 use warnings;
-#use base qw/Class::Accessor::Fast/;
-#__PACKAGE__->mk_accessors(qw/text title desc element/);
+use HTML::Feature::Engine::TagStructure;
+use HTML::Feature::Engine::LDRFullFeed;
+use HTML::Feature::Engine::GoogleADSection;
+use UNIVERSAL::require;
+use Encode;
+use base qw(HTML::Feature::Base);
 
 sub new {
     my $class = shift;
-    my $self = bless {@_}, $class;
+    my $self  = $class->SUPER::new(@_);
+    $self->_setup;
     return $self;
 }
 
-sub run { }
+sub run {
+    my $self     = shift;
+    my $html_ref = shift;
+    my $url      = shift;
+    my $c        = $self->context;
+    my $result   = HTML::Feature::Result->new;
+  LABEL:
+    for my $engine ( @{ $self->{engines} } ) {
+        $result = $engine->run( $html_ref, $url, $result );
+        if ( $result->{matched_engine} ) {
+            if ( defined $c->{enc_type} ) {
+                $result->title(
+                    Encode::encode( $c->{enc_type}, $result->title ) );
+                $result->desc(
+                    Encode::encode( $c->{enc_type}, $result->desc ) );
+                $result->text(
+                    Encode::encode( $c->{enc_type}, $result->text ) );
+            }
+            last LABEL;
+        }
+    }
+    return $result;
+}
+
+sub _setup {
+    my $self   = shift;
+    my $c      = $self->context;
+    my $config = $c->config;
+    if ( !defined $config->{engines} || @{ $config->{engines} } < 1 ) {
+        my $engine = HTML::Feature::Engine::TagStructure->new( context => $c );
+        push( @{ $self->{engines} }, $engine );
+    }
+    else {
+        for my $class ( @{ $config->{engines} } ) {
+            unless ( $class->can('new') ) {
+                $class->require or die $@;
+            }
+            my $engine = $class->new( context => $c );
+            push( @{ $self->{engines} }, $engine );
+        }
+    }
+}
 
 1;
-
 __END__
 
 =head1 NAME
 
-HTML::Feature::Engine -Base Class For HTML::Feature Engine
+HTML::Feature::Engine -
 
 =head1 SYNOPSIS
 
-    package HTML::Feature::Engine::SomeEngine;
-    use strict;
-    use base qw(HTML::Feature::Engine);
+  use HTML::Feature::Engine;
 
-    sub run {
-        ....
-    }
+=head1 DESCRIPTION
+
+HTML::Feature::Engine is
 
 =head1 METHODS
 
-=head2 new()
+=head2 new
 
-=head2 run()
+=head2 run
 
-    Starts the engine. The exact behavior differs between each engine
+=head1 AUTHOR
+
+Takeshi Miki E<lt>miki@cpan.orgE<gt>
+
+=head1 LICENSE
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=head1 SEE ALSO
 
 =cut

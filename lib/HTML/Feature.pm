@@ -1,187 +1,85 @@
 package HTML::Feature;
 use strict;
 use warnings;
-use vars qw($VERSION $UserAgent $engine @EXPORT_OK);
-use Exporter qw(import);
-use Carp;
-use HTTP::Response::Encoding;
-use Encode::Guess;
-use List::Util qw(first);
-use Scalar::Util qw(blessed);
-use UNIVERSAL::require;
-use URI;
+use HTML::Feature::FrontParser;
+use HTML::Feature::Engine;
+use base qw(HTML::Feature::Base);
 
-$VERSION   = '2.00006';
-@EXPORT_OK = qw(feature);
+__PACKAGE__->mk_accessors($_) for qw(_front_parser _engine);
+
+our $VERSION = '3.00001';
 
 sub new {
     my $class = shift;
-    my %arg   = @_;
-    $class = ref $class || $class;
-    my $self = bless \%arg, $class;
-    $self->{enc_type} ||= 'utf8';
-
+    my %args  = @_;
+    my $self  = $class->SUPER::new( config => \%args );
+    $self->_setup;
     return $self;
 }
 
 sub parse {
-    my $self = shift;
-    my $obj  = shift;
-
-    if ( !$obj ) {
-        croak('Usage: parse( $uri | $http_response | $html_ref )');
+    my $self     = shift;
+    my $whatever = shift;
+    my $url      = shift;
+    my $html     = $self->front_parser->parse($whatever);
+    if ( !$url and $self->{base_url} ) {
+        $url = $self->{base_url};
     }
-
-    my $pkg = blessed($obj);
-    if ( !$pkg ) {
-        if ( my $ref = ref $obj ) {
-
-            # if it's a scalar reference, then we've been passed a piece of
-            # HTML code.
-            if ( $ref eq 'SCALAR' ) {
-                return $self->parse_html( $obj, @_ );
-            }
-
-            # Otherwise we don't know how to handle
-            croak('Usage: parse( $uri | $http_response | $html_ref )');
-        }
-
-        # We seemed to have an unblessed scalar. Assume it's a URI
-        $pkg = 'URI';
-        $obj = URI->new($obj);
-    }
-
-    # If it's an object, then we can handle URI or HTTP::Response
-    if ( $pkg->isa('URI') ) {
-        return $self->parse_url( $obj, @_ );
-    }
-    elsif ( $pkg->isa('HTTP::Response') ) {
-        return $self->parse_response( $obj, @_ );
-    }
-    else {
-        croak('Usage: parse( $uri | $http_response | $html_ref )');
-    }
+    my $result = $self->engine->run( \$html, $url );
+    return $result;
 }
 
 sub parse_url {
     my $self = shift;
-    my $url  = shift;
-    my $ua   = $self->_user_agent();
-    my $res  = $ua->get($url);
-    $self->parse_response( $res, @_ );
+    $self->parse(@_);
 }
 
 sub parse_response {
     my $self = shift;
-    my $res  = shift;
-    $self->{base_url} = $res->base;
-    my $content = $self->_decode_response($res);
-    $self->_run( \$content, @_ );
+    $self->parse(@_);
 }
 
 sub parse_html {
-    my $self     = shift;
-    my $html     = shift;
-    my $html_ref = ref $html ? $html : \$html;
-    $self->_decode_htmlref($html_ref);
-    $self->_run( $html_ref, @_ );
+    my $self = shift;
+    $self->parse(@_);
+}
+
+sub _setup {
+    my $self = shift;
+    $self->front_parser( HTML::Feature::FrontParser->new( context => $self ) );
+    $self->engine( HTML::Feature::Engine->new( context => $self ) );
+    if(!$self->{not_encode}){
+        $self->{enc_type} ||= "utf8";
+    }
+}
+
+#---
+# accessor methods
+#---
+
+sub front_parser {
+    my $self = shift;
+    my $args = shift;
+    if ( !$args ) {
+        $self->_front_parser;
+    }
+    else {
+        $self->_front_parser($args);
+    }
 }
 
 sub engine {
-    my $self   = shift;
-    my $engine = $self->{engine_obj};
-    if ( !$engine ) {
-        my $engine_module = $self->{engine} ? $self->{engine} : 'TagStructure';
-        my $class = __PACKAGE__ . '::Engine::' . $engine_module;
-        $class->require or die $@;
-        $engine = $class->new;
-        $self->{engine_obj} = $engine;
-    }
-    return $engine;
-}
-
-sub _run {
-    my $self     = shift;
-    my $html_ref = shift;
-    my $opts     = shift || {};
-
-    local $self->{element_flag} =
-      exists $opts->{element_flag}
-      ? $opts->{element_flag}
-      : $self->{element_flag};
-    $self->engine->run( $self, $html_ref );
-}
-
-sub _decode_response {
     my $self = shift;
-    my $res  = shift;
-
-    my @encoding = (
-        $res->encoding,
-
-        # XXX - falling back to latin-1 may be risky. See Data::Decode
-        # could be multiple because HTTP response and META might be different
-        ( $res->header('Content-Type') =~ /charset=([\w\-]+)/g ),
-        "latin-1",
-    );
-    my $encoding = first { defined $_ && Encode::find_encoding($_) } @encoding;
-    return Encode::decode( $encoding, $res->content );
-}
-
-sub _decode_htmlref {
-    my $self     = shift;
-    my $html_ref = shift;
-
-    local $Encode::Guess::NoUTFAutoGuess = 1;
-    my $guess =
-      Encode::Guess::guess_encoding( $$html_ref,
-        ( 'shiftjis', 'euc-jp', '7bit-jis', 'utf8' ) );
-    unless ( ref $guess ) {
-        $$html_ref = Encode::decode( "latin-1", $$html_ref );
+    my $args = shift;
+    if ( !$args ) {
+        $self->_engine;
     }
     else {
-        eval { $$html_ref = $guess->decode($$html_ref); };
+        $self->_engine($args);
     }
-}
-
-sub _user_agent {
-    my $self = shift;
-    require LWP::UserAgent;
-    $UserAgent ||= LWP::UserAgent->new();
-    $self->{user_agent} and $UserAgent->agent( $self->{user_agent} );
-    $self->{http_proxy} and $UserAgent->proxy( ['http'], $self->{http_proxy} );
-    $self->{timeout}    and $UserAgent->timeout( $self->{timeout} );
-    return $UserAgent;
-}
-
-sub feature {
-    my $self   = __PACKAGE__->new;
-    my $result = $self->parse(@_);
-    my %ret    = (
-        text    => $result->text,
-        title   => $result->title,
-        desc    => $result->desc,
-        element => $result->element
-    );
-    return wantarray ? %ret : $ret{text};
-}
-
-sub extract {
-    warn
-"HTML::Feature::extract() has been deprecated. Use HTML::Feature::parse() instead";
-    my $self   = shift;
-    my %args   = @_;
-    my $result = $self->parse( $args{string} ? \$args{string} : $args{url} );
-    my $ret    = {
-        title       => $result->title,
-        description => $result->desc,
-        block       => [ { contents => $result->text } ],
-    };
-    return $ret;
 }
 
 1;
-
 __END__
 
 =head1 NAME
@@ -190,60 +88,83 @@ HTML::Feature - Extract Feature Sentences From HTML Documents
 
 =head1 SYNOPSIS
 
-    use HTML::Feature;
+  use HTML::Feature;
 
-    my $f = HTML::Feature->new(enc_type => 'utf8');
-    my $result = $f->parse('http://www.perl.com');
+  # simple usage
 
-    print "Title:"        , $result->title(), "\n";
-    print "Description:"  , $result->desc(),  "\n";
-    print "Featured Text:", $result->text(),  "\n";
+  my $feature = HTML::Feature->new;
+  my $result  = $feature->parse("http://www.perl.com");
 
-
-    # you can get a HTML::Element object
- 
-    my $f = HTML::Feature->new();
-    my $result = $f->parse('http://www.perl.com',{element_flag => 1});
-    print "HTML Element:",  $result->element->as_HTML, "\n";
-    $result->element_delete();
+  print "Title:"        , $result->title, "\n";
+  print "Description:"  , $result->desc , "\n";
+  print "Featured Text:", $result->text , "\n";
 
 
-    # a simpler method is, 
+  # you can set some engine modules serially. ( if one module can't extract text, it calls to next module )
 
-    use HTML::Feature qw(feature);
-    print scalar feature('http://www.perl.com');
+  my $feature = HTML::Feature->new( 
+    engines => [
+      'HTML::Feature::Engine::LDRFullFeed',
+      'HTML::Feature::Engine::GoogleADSection',
+      'HTML::Feature::Engine::TagStructure',
+    ],
+  );
 
-    # very simple!
+  my $result = $feature->parse($url);
 
 
-=head1 DESCRIPTION 
+  # And you can set your custom engine module in arbitrary place.
 
-This module extracst blocks of feature sentences out of an HTML document. 
+  my $feature = HTML::Feature->new( 
+    engines => [
+      'Your::Custom::Engine::Module'
+    ],
+  );
 
-Unlike other modules that performs similar tasks, this module by default
-extracts blocks without using morphological analysis, and instead it uses 
-simple statistics processing. 
 
-Because of this, HTML::Feature has an advantage over other similar modules 
-in that it can be applied to documents in any language.
+=head1 DESCRIPTION
 
-=head1 METHODS 
+This module extracst blocks of feature sentences out of an HTML document.
 
-=head2 new()
+Version 3.0, we provide three engines. 
 
-    my $f = HTML::Feature->new(%param);
-    my $f = HTML::Feature->new(
-        engine => $class, # backend engine module (default: 'TagStructure') 
-        max_bytes => 5000, # max number of bytes per node to analyze (default: '')
-        min_bytes => 10, # minimum number of bytes per node to analyze (default is '')
-        enc_type => 'euc-jp', # encoding of return values (default: 'utf-8')
-        user_agent => 'my-agent-name', # LWP::UserAgent->agent (default: 'libwww-perl/#.##') 
-        http_proxy => 'http://proxy:3128', # http proxy server (default: '')
-        timeout => 10, # set the timeout value in seconds. (default: 180)
-        element_flag => 1, # flag of HTML::Element object as returned value (default: '') 
-   );
+  1. LDRFullFeed
+
+    Use wedata's databaase that is compatible for LDR Full Feed.
+      see -> http://wedata.net/help/about ( Japanse only )
+
+  2. GoogleADSection
+
+    Extract by 'Google AD Section' HTML COMMENT TAG
+
+  3. TagStructure
+
+    Default engine. It guesses and extracts a feature sentence by HTML tag structure.
+    Unlike other modules that performs similar tasks, this module by default extracts blocks without using morphological analysis, and instead it uses simple statistics processing.
+    Because of this, HTML::Feature::Engine::TagStructure has an advantage over other similar modules in that it can be applied to documents in any language.
+
+=head1 METHODS
+
+=head2 new
 
 Instantiates a new HTML::Feature object. Takes the following parameters
+
+    my $f = HTML::Feature->new(%param);
+
+    my $f = HTML::Feature->new(
+        engines      => [ class_name1, 
+                          class_name2,       # backend engine module (default: 'TagStructure') 
+                          class_name3 ], 
+
+        user_agent   => 'my-agent-name',     # LWP::UserAgent->agent (default: 'libwww-perl/#.##') 
+        http_proxy   => 'http://proxy:3128', # http proxy server (default: '')
+        timeout      => 10,                  # set the timeout value in seconds. (default: 180)
+
+        not_decode   => 1,                   # if this value is 1, HTML::Feature does not decode the HTML document (default: '')
+        not_encode   => 1,                   # if this value is 1, HTML::Feature does not encode the result value  (default: '') 
+
+        element_flag => 1,                   # flag of HTML::Element object as returned value (default: '') 
+   );
 
 =over 4
 
@@ -251,16 +172,12 @@ Instantiates a new HTML::Feature object. Takes the following parameters
 
 Specifies the class name of the engine that you want to use.
 
-HTML::Feature is designed to accept different engines to change its behavior.
-If you want to customize the behavior of HTML::Feature, specify your own
-engine in this parameter
+HTML::Feature is designed to accept some different engines.
+If you want to customize the behavior of HTML::Feature, specify your own engine in this parameter.
 
 =back 
 
-The rest of the arguments are directly passed to the HTML::Feature::Engine 
-object constructor.
-
-=head2 parse()
+=head2 parse
 
     my $result = $f->parse($url);
     # or
@@ -271,6 +188,7 @@ object constructor.
 Parses the given argument. The argument can be either a URL, a string of HTML
 (must be passed as a scalar reference), or an HTTP::Response object.
 HTML::Feature will detect and delegate to the appropriate method (see below)
+
 
 =head2 parse_url($url)
 
@@ -284,56 +202,23 @@ Parses a string containing HTML.
 
 Parses an HTTP::Response object.
 
-=head2 extract()
+=head2 front_parser
 
-    $data = $f->extract(url => $url);
-    # or
-    $data = $f->extract(string => $html);
+accessor method that points to HTML::Feature::FrontParser object. 
 
-HTML::Feature::extract() has been deprecated and exists for backwards compatiblity only. Use HTML::Feature::parse() instead.
+=head2 engine
 
-extract() extracts blocks of feature sentences from the given document,
-and returns a data structure like this:
+accessor method that points to HTML::Feature::Engine object.
 
-    $data = {
-        title => $title,
-        description => $desc,
-        block => [
-            {
-                contents => $contents,
-                score => $score
-            },
-            .
-            .
-        ]
-    }
+=head1 AUTHOR
 
-=head2 feature
+Takeshi Miki E<lt>miki@cpan.orgE<gt>
 
-feature() is a simple wrapper that does new(), parse() in one step.
-If you do not require complex operations, simply calling this will suffice.
-In scalar context, it returns the feature text only. In list context,
-some more meta data will be returned as a hash.
+=head1 LICENSE
 
-This function is exported on demand.
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
 
-    use HTML::Feature qw(feature);
-    print scalar feature($url);  # print featured text
-
-    my %data = feature($url); # wantarray(hash)
-    print $data{title};
-    print $data{desc};
-    print $data{text};
-
-
-=head1 AUTHOR 
-
-Takeshi Miki <miki@cpan.org> 
-
-Special thanks to Daisuke Maki
-
-=head1 COPYRIGHT AND LICENSE
-
-Copyright (C) 2007 Takeshi Miki This library is free software; you can redistribute it and/or modifyit under the same terms as Perl itself, either Perl version 5.8.8 or,at your option, any later version of Perl 5 you may have available.
+=head1 SEE ALSO
 
 =cut

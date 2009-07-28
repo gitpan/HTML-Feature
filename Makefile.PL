@@ -1,26 +1,26 @@
-use strict;
 use inc::Module::Install;
-
 name 'HTML-Feature';
 all_from 'lib/HTML/Feature.pm';
 
-requires 'Carp';
-requires 'LWP::UserAgent';
-requires 'HTTP::Response::Encoding';
-requires 'Encode::Guess';
-requires 'UNIVERSAL::require';
-requires 'List::Util';
-requires 'Scalar::Util';
-requires 'HTML::TreeBuilder';
 requires 'Class::Accessor::Fast';
-requires 'HTML::TreeBuilder';
+requires 'Class::Data::ConfigHash';
+requires 'UNIVERSAL::require';
+requires 'Encode';
+requires 'Carp';
+requires 'URI';
+requires 'Scalar::Util';
+requires 'LWP::UserAgent';
+requires 'LWP::Simple';
+requires 'HTTP::Request';
 requires 'Statistics::Lite';
+requires 'Storable';
+requires 'JSON';
+requires 'HTML::TreeBuilder::LibXML'; 
+requires 'HTML::TreeBuilder::XPath'; 
+requires 'Data::Decode', '0.00007_01';
 
 build_requires 'Test::More';
-build_requires 'Path::Class';
-build_requires 'FindBin';
-
-tests 't/*.t t/*/*.t'; 
-
-auto_install;
+use_test_base;
+tests 't/*.t t/*/*.t t/*/*/*.t'; 
+auto_include;
 WriteAll;

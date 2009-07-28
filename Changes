@@ -1,5 +1,13 @@
-Revision history for Perl extension HTML::Feature.
+Revision history for Perl extension HTML::Feature
 
+
+3.00001 2009.07.27
+    - Major version up.
+    - Improved it to be able to be equipped with plural engines
+         HTML::Feature::Engine::LDRFullFeed
+         HTML::Feature::Engine::GoogleADSection
+         HTML::Feature::Engine::TagStructure
+    - replace HTML::TreeBuilder to HTML::TreeBuilder::LibXML ( or HTML::TreeBuilder::XPath )
 
 2.00006 2008.10.05
     - fix a bug that improperty joins of several words
@@ -56,13 +64,5 @@ Revision history for Perl extension HTML::Feature.
     - It is deleted a definition of Data::Dumper by a module
 
 0.0.1  Wed Dec 27 12:49:20 2006
-	- original version; created by h2xs 1.23 with options
-		-AX -n HTML::Feature
-
-
-
-
-
-
-
-
+    - original version; created by h2xs 1.23 with options
+        -AX -n HTML::Feature
