@@ -19,7 +19,7 @@ requires:
   Carp: 0
   Class::Accessor::Fast: 0
   Class::Data::ConfigHash: 0
-  Data::Decode: 0.00007_01
+  Data::Decode: 0.00006
   Encode: 0
   HTML::TreeBuilder::LibXML: 0
   HTML::TreeBuilder::XPath: 0
@@ -34,4 +34,4 @@ requires:
   URI: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 3.00003
+version: 3.00004
