@@ -35,4 +35,4 @@ requires:
   URI: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 3.00007
+version: 3.00008
