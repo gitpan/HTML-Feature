@@ -3,9 +3,11 @@ abstract: 'Extract Feature Sentences From HTML Documents'
 author:
   - 'Takeshi Miki <miki@cpan.org>'
 build_requires:
-  Test::More: 0
+  ExtUtils::MakeMaker: 6.42
+configure_requires:
+  ExtUtils::MakeMaker: 6.42
 distribution_type: module
-generated_by: 'Module::Install version 0.77'
+generated_by: 'Module::Install version 0.97'
 license: perl
 meta-spec:
   url: http://module-build.sourceforge.net/META-spec-v1.4.html
@@ -21,6 +23,7 @@ requires:
   Class::Data::ConfigHash: 0
   Data::Decode: 0.00006
   Encode: 0
+  Filter::Util::Call: 0
   HTML::TreeBuilder::LibXML: 0
   HTML::TreeBuilder::XPath: 0
   HTTP::Request: 0
@@ -34,4 +37,4 @@ requires:
   URI: 0
 resources:
   license: http://dev.perl.org/licenses/
-version: 3.00010
+version: 3.00011

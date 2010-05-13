@@ -7,7 +7,7 @@ use LWP::UserAgent;
 my $feature = HTML::Feature->new(
     ## You can set some engine modules serially. ( if one module can't extract text, it calls to next module )
     engines => [
-        'HTML::Feature::Engine::LDRFullFeed',
+    #    'HTML::Feature::Engine::LDRFullFeed',
         'HTML::Feature::Engine::GoogleADSection',
         'HTML::Feature::Engine::TagStructure',
     ],

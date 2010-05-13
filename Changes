@@ -1,5 +1,8 @@
 Revision history for Perl extension HTML::Feature
 
+3.00011 2010.05.13
+    - use Scalar::Util::weaken at HTML::Feature::Base to avoid memory leak.
+    - update LDRFullFeed's data(item.st)
 
 3.00010 2009.10.08
     - fix a bug of Storable's 64bit-compatibility

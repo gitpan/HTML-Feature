@@ -20,6 +20,7 @@ requires 'HTML::TreeBuilder::XPath';
 requires 'Data::Decode', '0.00006';
 
 build_requires 'Test::More';
+build_requires 'Test::Memory::Cycle';
 use_test_base;
 tests 't/*.t t/*/*.t t/*/*/*.t'; 
 auto_include;

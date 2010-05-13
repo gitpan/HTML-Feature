@@ -1,6 +1,7 @@
 package HTML::Feature::Base;
 use strict;
 use warnings;
+use Scalar::Util qw(weaken);
 use base qw(Class::Accessor::Fast Class::Data::ConfigHash);
 
 __PACKAGE__->mk_accessors($_) for qw(context);
@@ -13,6 +14,7 @@ sub new {
     if ($config) {
         $self->config($config);
     }
+	weaken($self->{context});
     return $self;
 }
 
